@@ -11,7 +11,7 @@
 - 阶段 3 状态：已完成采购入库、采购退货、仓库调拨、生产领退料、库存盘点、效期预警、库存趋势和生产净耗用排行。
 - 阶段 4 状态：进行中；批次、存栏、饲喂领料、健康/用药、称重、饲料成本和 ADG 已完成，FCR、完整批次成本和趋势分析待开发。
 - 最近已验证的升级前备份：`backups/agriculture_management-before-livestock-production-20260817-194445.sql`，SHA256 为 `F9E8501C632735C5013014958EA6F7503236189C13024A68AC549A98211D5A97`。
-- 当前质量门禁：Ruff、pytest、ESLint、Vitest、Vue 类型检查和 Vite 构建通过；MySQL 集成、桌面与移动 Playwright 及正式库对账将在 `0011` 正式迁移后复验。
+- 当前质量门禁：Ruff、pytest 29 项、MySQL 集成 1 项、ESLint、Vitest 4 项、Vue 类型检查、Vite 构建和桌面/移动 Playwright 6 项均通过；`0011` 已在隔离 MySQL 测试库完成真实迁移与结构检查，正式库将在取得一次性 DDL 账号后发布和复验。
 
 ## 后续优化优先级
 
