@@ -467,6 +467,42 @@ class PurchaseInventoryTestCase(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(reconcile_inventory(self.farm["id"]), [])
 
+    def test_feed_issue_can_be_traced_to_livestock_batch(self):
+        catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
+        pig_species_id = next(item["id"] for item in catalogs["livestockSpecies"] if item["code"] == "PIG")
+        batch_response = self.post(self.manager, "/livestock-batches", {
+            "farmId": self.farm["id"],
+            "speciesId": pig_species_id,
+            "batchNo": "PIG-FEED-001",
+            "name": "饲喂成本测试批次",
+            "entryNo": "PIG-ENTRY-001",
+            "entryDate": "2026-08-15",
+            "barnId": self.barn["id"],
+            "initialCount": 20,
+        })
+        self.assertEqual(batch_response.status_code, 201)
+        batch = batch_response.get_json()["data"]["batch"]
+
+        purchase = self.post(
+            self.operator,
+            "/purchases",
+            self.purchase_input("PO-BATCH-FEED", quantity="10"),
+        ).get_json()["data"]["purchase"]
+        self.post(self.operator, f"/purchases/{purchase['id']}/post", {"version": purchase["version"]})
+        issue = self.production_operation_input("FEED-BATCH-001", cost_object_type="livestock_batch")
+        issue["costObjectId"] = batch["id"]
+        created = self.post(self.operator, "/production-stock-operations", issue)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["data"]["operation"]["costObjectType"], "livestock_batch")
+
+        detail = self.viewer.get(f"/api/v1/livestock-batches/{batch['id']}")
+        self.assertEqual(detail.status_code, 200)
+        data = detail.get_json()["data"]["batch"]
+        self.assertEqual(data["feedingRecords"][0]["documentNo"], "FEED-BATCH-001")
+        self.assertEqual(data["productionSummary"]["totalFeedCost"], "74.07")
+        with self.app.app_context():
+            self.assertEqual(reconcile_inventory(self.farm["id"]), [])
+
     def test_purchase_returns_use_simulated_costs_and_allow_partial_returns(self):
         first = self.post(
             self.operator,

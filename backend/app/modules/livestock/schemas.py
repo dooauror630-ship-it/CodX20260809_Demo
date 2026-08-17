@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
@@ -6,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_v
 
 LivestockBatchStatus = Literal["all", "ACTIVE", "CLOSED"]
 LivestockMovementType = Literal["TRANSFER", "DEATH", "CULL", "EXIT"]
+LivestockHealthType = Literal["VACCINATION", "MEDICATION", "DISEASE", "OTHER"]
 
 
 class LivestockBatchListQuery(BaseModel):
@@ -83,3 +85,49 @@ class CreateLivestockMovementPayload(BaseModel):
         if self.movement_type in ("DEATH", "CULL") and not self.reason:
             raise ValueError("reason required")
         return self
+
+
+class CreateLivestockHealthRecordPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    farm_id: StrictInt = Field(alias="farmId", gt=0)
+    batch_id: StrictInt = Field(alias="batchId", gt=0)
+    record_no: StrictStr = Field(alias="recordNo", min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    record_type: LivestockHealthType = Field(alias="recordType")
+    occurred_on: date = Field(alias="occurredOn")
+    description: StrictStr = Field(min_length=2, max_length=255)
+    medicine_name: StrictStr | None = Field(default=None, alias="medicineName", max_length=120)
+    dosage: StrictStr | None = Field(default=None, max_length=80)
+    notes: StrictStr | None = Field(default=None, max_length=500)
+
+    @field_validator("record_no")
+    @classmethod
+    def normalize_record_no(cls, value):
+        return value.upper()
+
+    @field_validator("medicine_name", "dosage", "notes")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        return value or None
+
+
+class CreateLivestockWeightRecordPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    farm_id: StrictInt = Field(alias="farmId", gt=0)
+    batch_id: StrictInt = Field(alias="batchId", gt=0)
+    record_no: StrictStr = Field(alias="recordNo", min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    occurred_on: date = Field(alias="occurredOn")
+    sample_count: StrictInt = Field(alias="sampleCount", gt=0, le=2_000_000_000)
+    average_weight: Decimal = Field(alias="averageWeight", gt=0, max_digits=10, decimal_places=3)
+    notes: StrictStr | None = Field(default=None, max_length=500)
+
+    @field_validator("record_no")
+    @classmethod
+    def normalize_record_no(cls, value):
+        return value.upper()
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        return value or None

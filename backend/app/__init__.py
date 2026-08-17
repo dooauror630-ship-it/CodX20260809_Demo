@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0010_livestock"
+REQUIRED_SCHEMA_REVISION = "0011_livestock_production"
 
 
 REQUIRED_SCHEMA = {
@@ -100,6 +100,14 @@ REQUIRED_SCHEMA = {
     "livestock_movements": {
         "id", "farm_id", "batch_id", "movement_no", "movement_type", "from_barn_id", "to_barn_id",
         "quantity", "occurred_on", "reason", "notes", "created_by_id", "created_at",
+    },
+    "livestock_health_records": {
+        "id", "farm_id", "batch_id", "record_no", "record_type", "occurred_on",
+        "description", "medicine_name", "dosage", "notes", "created_by_id", "created_at",
+    },
+    "livestock_weight_records": {
+        "id", "farm_id", "batch_id", "record_no", "occurred_on", "sample_count",
+        "average_weight", "notes", "created_by_id", "created_at",
     },
 }
 

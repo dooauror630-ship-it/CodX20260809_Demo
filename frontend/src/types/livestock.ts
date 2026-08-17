@@ -1,6 +1,45 @@
+import type { ProductionStockOperation } from "@/types/purchase";
+
 export type LivestockBatchStatus = "ACTIVE" | "CLOSED";
 export type LivestockMovementType = "ENTRY" | "TRANSFER" | "DEATH" | "CULL" | "EXIT";
 export type WritableLivestockMovementType = Exclude<LivestockMovementType, "ENTRY">;
+export type LivestockHealthType = "VACCINATION" | "MEDICATION" | "DISEASE" | "OTHER";
+
+export interface LivestockHealthRecord {
+  id: number;
+  farmId: number;
+  batchId: number;
+  recordNo: string;
+  recordType: LivestockHealthType;
+  occurredOn: string;
+  description: string;
+  medicineName: string | null;
+  dosage: string | null;
+  notes: string | null;
+  createdById: number;
+  createdAt: string | null;
+}
+
+export interface LivestockWeightRecord {
+  id: number;
+  farmId: number;
+  batchId: number;
+  recordNo: string;
+  occurredOn: string;
+  sampleCount: number;
+  averageWeight: string;
+  notes: string | null;
+  createdById: number;
+  createdAt: string | null;
+}
+
+export interface LivestockProductionSummary {
+  totalFeedCost: string;
+  latestAverageWeight: string | null;
+  latestWeightDate: string | null;
+  adg: string | null;
+  healthRecordCount: number;
+}
 
 export interface LivestockBarnBalance {
   barnId: number;
@@ -51,6 +90,10 @@ export interface LivestockBatch {
   movementCount: number;
   barnBalances: LivestockBarnBalance[];
   movements?: LivestockMovement[];
+  healthRecords?: LivestockHealthRecord[];
+  weightRecords?: LivestockWeightRecord[];
+  feedingRecords?: ProductionStockOperation[];
+  productionSummary?: LivestockProductionSummary;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -104,5 +147,27 @@ export interface CreateLivestockMovementInput {
   toBarnId?: number | null;
   quantity: number;
   reason?: string | null;
+  notes?: string | null;
+}
+
+export interface CreateLivestockHealthRecordInput {
+  farmId: number;
+  batchId: number;
+  recordNo: string;
+  recordType: LivestockHealthType;
+  occurredOn: string;
+  description: string;
+  medicineName?: string | null;
+  dosage?: string | null;
+  notes?: string | null;
+}
+
+export interface CreateLivestockWeightRecordInput {
+  farmId: number;
+  batchId: number;
+  recordNo: string;
+  occurredOn: string;
+  sampleCount: number;
+  averageWeight: number;
   notes?: string | null;
 }

@@ -222,7 +222,7 @@ export interface StockTransfer {
 }
 
 export type ProductionStockOperationType = "issue" | "return";
-export type ProductionCostObjectType = "farm" | "barn" | "plot";
+export type ProductionCostObjectType = "farm" | "barn" | "plot" | "livestock_batch";
 
 export interface CreateProductionStockOperationInput {
   farmId: number;

@@ -1,11 +1,15 @@
 import { apiClient } from "./client";
 import type {
   CreateLivestockBatchInput,
+  CreateLivestockHealthRecordInput,
   CreateLivestockMovementInput,
+  CreateLivestockWeightRecordInput,
   LivestockBatch,
   LivestockBatchListData,
   LivestockBatchListQuery,
   LivestockMovement,
+  LivestockHealthRecord,
+  LivestockWeightRecord,
 } from "@/types/livestock";
 
 
@@ -41,4 +45,16 @@ export async function createLivestockMovement(input: CreateLivestockMovementInpu
       input,
     )
   ).data.data;
+}
+
+export async function createLivestockHealthRecord(input: CreateLivestockHealthRecordInput) {
+  return (
+    await apiClient.post<DataResponse<{ record: LivestockHealthRecord }>>("/livestock-health-records", input)
+  ).data.data.record;
+}
+
+export async function createLivestockWeightRecord(input: CreateLivestockWeightRecordInput) {
+  return (
+    await apiClient.post<DataResponse<{ record: LivestockWeightRecord }>>("/livestock-weight-records", input)
+  ).data.data.record;
 }

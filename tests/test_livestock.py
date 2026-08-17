@@ -297,6 +297,60 @@ class LivestockBatchTestCase(unittest.TestCase):
         )
         self.assertEqual(self.post(self.operator, "/livestock-movements", disabled_destination).status_code, 409)
 
+    def test_health_and_weight_records_are_auditable_and_calculate_adg(self):
+        entry_date = date.today() - timedelta(days=10)
+        batch = self.create_batch(entryDate=entry_date.isoformat())
+        health = {
+            "farmId": self.farm["id"],
+            "batchId": batch["id"],
+            "recordNo": "HEALTH-001",
+            "recordType": "VACCINATION",
+            "occurredOn": (entry_date + timedelta(days=1)).isoformat(),
+            "description": "猪瘟疫苗首免",
+            "medicineName": "猪瘟活疫苗",
+            "dosage": "每头 1 头份",
+            "notes": "观察无异常",
+        }
+        self.assertEqual(self.post(self.viewer, "/livestock-health-records", health).status_code, 403)
+        created = self.post(self.operator, "/livestock-health-records", health)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(self.post(self.operator, "/livestock-health-records", health).status_code, 200)
+        self.assertEqual(
+            self.post(self.operator, "/livestock-health-records", {**health, "description": "内容变化"}).status_code,
+            409,
+        )
+
+        first_weight = {
+            "farmId": self.farm["id"],
+            "batchId": batch["id"],
+            "recordNo": "WEIGHT-001",
+            "occurredOn": entry_date.isoformat(),
+            "sampleCount": 10,
+            "averageWeight": "20.000",
+            "notes": "入栏抽样",
+        }
+        latest_weight = {
+            **first_weight,
+            "recordNo": "WEIGHT-002",
+            "occurredOn": date.today().isoformat(),
+            "averageWeight": "27.500",
+            "notes": "十日抽样",
+        }
+        self.assertEqual(self.post(self.manager, "/livestock-weight-records", first_weight).status_code, 201)
+        self.assertEqual(self.post(self.operator, "/livestock-weight-records", latest_weight).status_code, 201)
+
+        detail = self.viewer.get(f"/api/v1/livestock-batches/{batch['id']}")
+        self.assertEqual(detail.status_code, 200)
+        data = detail.get_json()["data"]["batch"]
+        self.assertEqual(data["healthRecords"][0]["recordNo"], "HEALTH-001")
+        self.assertEqual([item["recordNo"] for item in data["weightRecords"]], ["WEIGHT-002", "WEIGHT-001"])
+        self.assertEqual(data["productionSummary"]["latestAverageWeight"], "27.5")
+        self.assertEqual(data["productionSummary"]["adg"], "0.750")
+        self.assertEqual(data["productionSummary"]["healthRecordCount"], 1)
+
+        before_entry = {**first_weight, "recordNo": "WEIGHT-EARLY", "occurredOn": (entry_date - timedelta(days=1)).isoformat()}
+        self.assertEqual(self.post(self.operator, "/livestock-weight-records", before_entry).status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

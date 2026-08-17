@@ -3,8 +3,21 @@ from flask import Blueprint, g, request
 from ...core.errors import success_response
 from ...core.security import login_required
 from ..auth.schemas import parse_payload
-from .schemas import CreateLivestockBatchPayload, CreateLivestockMovementPayload, LivestockBatchListQuery
-from .service import create_livestock_batch, create_livestock_movement, livestock_batch_detail, list_livestock_batches
+from .schemas import (
+    CreateLivestockBatchPayload,
+    CreateLivestockHealthRecordPayload,
+    CreateLivestockMovementPayload,
+    CreateLivestockWeightRecordPayload,
+    LivestockBatchListQuery,
+)
+from .service import (
+    create_livestock_batch,
+    create_livestock_health_record,
+    create_livestock_movement,
+    create_livestock_weight_record,
+    livestock_batch_detail,
+    list_livestock_batches,
+)
 
 
 livestock_bp = Blueprint("livestock", __name__)
@@ -43,5 +56,29 @@ def add_livestock_movement():
     return success_response(
         {"movement": movement, "batch": batch},
         "存栏变动已登记" if created else "该存栏变动已登记",
+        201 if created else 200,
+    )
+
+
+@livestock_bp.post("/livestock-health-records")
+@login_required
+def add_livestock_health_record():
+    payload = parse_payload(CreateLivestockHealthRecordPayload, request.get_json(silent=True), "生猪健康记录格式错误")
+    record, created = create_livestock_health_record(payload, g.current_user)
+    return success_response(
+        {"record": record},
+        "健康记录已登记" if created else "该健康记录已登记",
+        201 if created else 200,
+    )
+
+
+@livestock_bp.post("/livestock-weight-records")
+@login_required
+def add_livestock_weight_record():
+    payload = parse_payload(CreateLivestockWeightRecordPayload, request.get_json(silent=True), "生猪称重记录格式错误")
+    record, created = create_livestock_weight_record(payload, g.current_user)
+    return success_response(
+        {"record": record},
+        "称重记录已登记" if created else "该称重记录已登记",
         201 if created else 200,
     )

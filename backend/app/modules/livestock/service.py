@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import date, datetime, time
+from decimal import Decimal
 from math import ceil
 
 from sqlalchemy import case, func, or_, select
@@ -11,8 +12,9 @@ from ..auth.service import format_datetime
 from ..catalog.models import LivestockSpecies
 from ..farm.models import Barn
 from ..farm.service import get_accessible_farm
-from ..inventory.purchase_service import _require_write_access
-from .models import LivestockBatch, LivestockMovement
+from ..inventory.models import StockDocument, StockMovementLine
+from ..inventory.purchase_service import _production_operation_payload, _require_write_access
+from .models import LivestockBatch, LivestockHealthRecord, LivestockMovement, LivestockWeightRecord
 
 
 REDUCTION_TYPES = ("DEATH", "CULL", "EXIT")
@@ -141,6 +143,38 @@ def _movement_payload(movement, barns=None):
     }
 
 
+def _health_payload(record):
+    return {
+        "id": record.id,
+        "farmId": record.farm_id,
+        "batchId": record.batch_id,
+        "recordNo": record.record_no,
+        "recordType": record.record_type,
+        "occurredOn": record.occurred_on.isoformat(),
+        "description": record.description,
+        "medicineName": record.medicine_name,
+        "dosage": record.dosage,
+        "notes": record.notes,
+        "createdById": record.created_by_id,
+        "createdAt": format_datetime(record.created_at),
+    }
+
+
+def _weight_payload(record):
+    return {
+        "id": record.id,
+        "farmId": record.farm_id,
+        "batchId": record.batch_id,
+        "recordNo": record.record_no,
+        "occurredOn": record.occurred_on.isoformat(),
+        "sampleCount": record.sample_count,
+        "averageWeight": format(record.average_weight, "f").rstrip("0").rstrip("."),
+        "notes": record.notes,
+        "createdById": record.created_by_id,
+        "createdAt": format_datetime(record.created_at),
+    }
+
+
 def _farm_summary(farm_id):
     active_batch_count = db.session.scalar(
         select(func.count(LivestockBatch.id)).where(
@@ -238,9 +272,52 @@ def livestock_batch_detail(batch_id, actor):
         barn.id: barn
         for barn in db.session.scalars(select(Barn).where(Barn.id.in_(barn_ids))).all()
     } if barn_ids else {}
+    health_records = db.session.scalars(
+        select(LivestockHealthRecord)
+        .where(LivestockHealthRecord.batch_id == batch.id)
+        .order_by(LivestockHealthRecord.occurred_on.desc(), LivestockHealthRecord.id.desc())
+    ).all()
+    weight_records = db.session.scalars(
+        select(LivestockWeightRecord)
+        .where(LivestockWeightRecord.batch_id == batch.id)
+        .order_by(LivestockWeightRecord.occurred_on.desc(), LivestockWeightRecord.id.desc())
+    ).all()
+    feeding_documents = db.session.scalars(
+        select(StockDocument)
+        .join(StockMovementLine, StockMovementLine.stock_document_id == StockDocument.id)
+        .where(
+            StockDocument.status == "POSTED",
+            StockMovementLine.cost_object_type == "LIVESTOCK_BATCH",
+            StockMovementLine.cost_object_id == batch.id,
+        )
+        .order_by(StockDocument.occurred_at.desc(), StockDocument.id.desc())
+    ).all()
+    feeding_records = [_production_operation_payload(document) for document in feeding_documents]
+    total_feed_cost = sum(
+        (Decimal(record["amount"]) if record["operationType"] == "issue" else -Decimal(record["amount"]))
+        for record in feeding_records
+    )
+    chronological_weights = sorted(weight_records, key=lambda item: (item.occurred_on, item.id))
+    adg = None
+    if len(chronological_weights) >= 2:
+        first, latest = chronological_weights[0], chronological_weights[-1]
+        days = (latest.occurred_on - first.occurred_on).days
+        if days > 0:
+            adg = format((latest.average_weight - first.average_weight) / days, ".3f")
+    latest_weight = chronological_weights[-1] if chronological_weights else None
     return {
         **_batch_payload(batch, species, state),
         "movements": [_movement_payload(movement, barns) for movement in movements],
+        "healthRecords": [_health_payload(record) for record in health_records],
+        "weightRecords": [_weight_payload(record) for record in weight_records],
+        "feedingRecords": feeding_records,
+        "productionSummary": {
+            "totalFeedCost": format(total_feed_cost, ".2f"),
+            "latestAverageWeight": _weight_payload(latest_weight)["averageWeight"] if latest_weight else None,
+            "latestWeightDate": latest_weight.occurred_on.isoformat() if latest_weight else None,
+            "adg": adg,
+            "healthRecordCount": len(health_records),
+        },
     }
 
 
@@ -481,3 +558,94 @@ def create_livestock_movement(payload, actor):
             return *existing, False
         raise ApiError("存栏变动登记冲突，请刷新后重试", 409, "LIVESTOCK_MOVEMENT_CONFLICT") from error
     return _movement_payload(movement), livestock_batch_detail(batch.id, actor), True
+
+
+def _validate_production_record_batch(payload):
+    batch = _get_batch(payload.batch_id)
+    if batch.farm_id != payload.farm_id:
+        raise ApiError("养殖批次不属于当前农场", 409, "LIVESTOCK_BATCH_FARM_MISMATCH", "batchId")
+    if batch.status != "ACTIVE":
+        raise ApiError("批次已结束，不能继续登记生产记录", 409, "LIVESTOCK_BATCH_CLOSED")
+    if payload.occurred_on < batch.entry_date:
+        raise ApiError("记录日期不能早于入栏日期", 409, "LIVESTOCK_RECORD_BEFORE_ENTRY", "occurredOn")
+    if payload.occurred_on > date.today():
+        raise ApiError("记录日期不能晚于今天", 400, "LIVESTOCK_RECORD_IN_FUTURE", "occurredOn")
+    return batch
+
+
+def create_livestock_health_record(payload, actor):
+    _require_write_access(payload.farm_id, actor)
+    existing = db.session.scalar(select(LivestockHealthRecord).where(
+        LivestockHealthRecord.farm_id == payload.farm_id,
+        LivestockHealthRecord.record_no == payload.record_no,
+    ))
+    if existing is not None:
+        matches = all((
+            existing.batch_id == payload.batch_id,
+            existing.record_type == payload.record_type,
+            existing.occurred_on == payload.occurred_on,
+            existing.description == payload.description,
+            existing.medicine_name == payload.medicine_name,
+            existing.dosage == payload.dosage,
+            existing.notes == payload.notes,
+        ))
+        if not matches:
+            raise ApiError("健康记录编号已存在且内容不同", 409, "LIVESTOCK_HEALTH_NO_EXISTS", "recordNo")
+        return _health_payload(existing), False
+    _validate_production_record_batch(payload)
+    record = LivestockHealthRecord(
+        farm_id=payload.farm_id,
+        batch_id=payload.batch_id,
+        record_no=payload.record_no,
+        record_type=payload.record_type,
+        occurred_on=payload.occurred_on,
+        description=payload.description,
+        medicine_name=payload.medicine_name,
+        dosage=payload.dosage,
+        notes=payload.notes,
+        created_by_id=actor.id,
+    )
+    db.session.add(record)
+    try:
+        db.session.commit()
+    except IntegrityError as error:
+        db.session.rollback()
+        raise ApiError("健康记录登记冲突，请刷新后重试", 409, "LIVESTOCK_HEALTH_CONFLICT") from error
+    return _health_payload(record), True
+
+
+def create_livestock_weight_record(payload, actor):
+    _require_write_access(payload.farm_id, actor)
+    existing = db.session.scalar(select(LivestockWeightRecord).where(
+        LivestockWeightRecord.farm_id == payload.farm_id,
+        LivestockWeightRecord.record_no == payload.record_no,
+    ))
+    if existing is not None:
+        matches = all((
+            existing.batch_id == payload.batch_id,
+            existing.occurred_on == payload.occurred_on,
+            existing.sample_count == payload.sample_count,
+            existing.average_weight == payload.average_weight,
+            existing.notes == payload.notes,
+        ))
+        if not matches:
+            raise ApiError("称重记录编号已存在且内容不同", 409, "LIVESTOCK_WEIGHT_NO_EXISTS", "recordNo")
+        return _weight_payload(existing), False
+    _validate_production_record_batch(payload)
+    record = LivestockWeightRecord(
+        farm_id=payload.farm_id,
+        batch_id=payload.batch_id,
+        record_no=payload.record_no,
+        occurred_on=payload.occurred_on,
+        sample_count=payload.sample_count,
+        average_weight=payload.average_weight,
+        notes=payload.notes,
+        created_by_id=actor.id,
+    )
+    db.session.add(record)
+    try:
+        db.session.commit()
+    except IntegrityError as error:
+        db.session.rollback()
+        raise ApiError("称重记录登记冲突，请刷新后重试", 409, "LIVESTOCK_WEIGHT_CONFLICT") from error
+    return _weight_payload(record), True

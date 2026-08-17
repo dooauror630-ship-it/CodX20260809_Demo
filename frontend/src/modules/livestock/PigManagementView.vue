@@ -7,19 +7,25 @@ import { useRouter } from "vue-router";
 import { getCatalogs } from "@/api/catalogs";
 import { errorMessage } from "@/api/client";
 import { getBarns } from "@/api/farms";
+import { getItems, getWarehouses } from "@/api/inventory";
 import {
   createLivestockBatch,
+  createLivestockHealthRecord,
   createLivestockMovement,
+  createLivestockWeightRecord,
   getLivestockBatch,
   getLivestockBatches,
 } from "@/api/livestock";
+import { createProductionStockOperation } from "@/api/purchases";
 import { useAuthStore } from "@/stores/auth";
 import { useFarmStore } from "@/stores/farm";
 import type { LivestockSpecies } from "@/types/catalog";
 import type { Barn } from "@/types/farm";
+import type { Item, Warehouse } from "@/types/inventory";
 import type {
   LivestockBatch,
   LivestockBatchStatus,
+  LivestockHealthType,
   LivestockMovement,
   LivestockSummary,
   WritableLivestockMovementType,
@@ -35,6 +41,8 @@ const compactTable = ref(false);
 const referencesLoading = ref(false);
 const batches = ref<LivestockBatch[]>([]);
 const barns = ref<Barn[]>([]);
+const warehouses = ref<Warehouse[]>([]);
+const feedItems = ref<Item[]>([]);
 const pigSpecies = ref<LivestockSpecies | null>(null);
 const filters = reactive({
   keyword: "",
@@ -78,6 +86,24 @@ const movementForm = reactive({
 const detailDialogVisible = ref(false);
 const detailLoading = ref(false);
 const detailBatch = ref<LivestockBatch | null>(null);
+const productionDialogVisible = ref(false);
+const productionSaving = ref(false);
+const productionType = ref<"feeding" | "health" | "weight">("feeding");
+const productionForm = reactive({
+  recordNo: "",
+  occurredOn: "",
+  warehouseId: null as number | null,
+  itemId: null as number | null,
+  quantity: 1,
+  lotNo: "",
+  healthType: "VACCINATION" as LivestockHealthType,
+  description: "",
+  medicineName: "",
+  dosage: "",
+  sampleCount: 10,
+  averageWeight: 1,
+  notes: "",
+});
 
 const canOperate = computed(() => {
   const role = farmContext.currentFarm?.accessRole;
@@ -94,6 +120,12 @@ const movementTypeOptions: Array<{ label: string; value: WritableLivestockMoveme
   { label: "淘汰", value: "CULL" },
   { label: "出栏", value: "EXIT" },
 ];
+const healthTypeNames: Record<LivestockHealthType, string> = {
+  VACCINATION: "防疫",
+  MEDICATION: "用药",
+  DISEASE: "病情",
+  OTHER: "其他",
+};
 
 function suggestedNo(prefix: string) {
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
@@ -147,12 +179,16 @@ async function loadReferences() {
   }
   referencesLoading.value = true;
   try {
-    const [catalogs, barnData] = await Promise.all([
+    const [catalogs, barnData, warehouseData, itemData] = await Promise.all([
       getCatalogs(),
       getBarns({ farmId, page: 1, pageSize: 100, status: "active" }),
+      getWarehouses({ farmId, page: 1, pageSize: 100, status: "active" }),
+      getItems({ farmId, page: 1, pageSize: 100, status: "active" }),
     ]);
     pigSpecies.value = catalogs.livestockSpecies.find((item) => item.code === "PIG" && item.isActive) ?? null;
     barns.value = barnData.items;
+    warehouses.value = warehouseData.items;
+    feedItems.value = itemData.items.filter((item) => item.itemType === "feed");
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
@@ -353,6 +389,89 @@ async function openDetail(batch: LivestockBatch) {
   }
 }
 
+function openProduction(type: "feeding" | "health" | "weight") {
+  productionType.value = type;
+  productionForm.recordNo = suggestedNo(type === "feeding" ? "FD" : type === "health" ? "HL" : "WT");
+  productionForm.occurredOn = localDateInputValue();
+  productionForm.warehouseId = warehouses.value[0]?.id ?? null;
+  productionForm.itemId = feedItems.value[0]?.id ?? null;
+  productionForm.quantity = 1;
+  productionForm.lotNo = "";
+  productionForm.healthType = "VACCINATION";
+  productionForm.description = "";
+  productionForm.medicineName = "";
+  productionForm.dosage = "";
+  productionForm.sampleCount = 10;
+  productionForm.averageWeight = 1;
+  productionForm.notes = "";
+  productionDialogVisible.value = true;
+}
+
+async function saveProductionRecord() {
+  const farmId = farmContext.currentFarmId;
+  const batch = detailBatch.value;
+  if (!farmId || !batch) return;
+  if (!/^[A-Za-z0-9_-]{3,40}$/.test(productionForm.recordNo.trim())) {
+    return ElMessage.error("记录单号须为 3-40 位字母、数字、下划线或短横线");
+  }
+  if (!productionForm.occurredOn || productionForm.occurredOn < batch.entryDate || productionForm.occurredOn > localDateInputValue()) {
+    return ElMessage.error("记录日期须在入栏日期至今天之间");
+  }
+  productionSaving.value = true;
+  try {
+    if (productionType.value === "feeding") {
+      if (!productionForm.warehouseId || !productionForm.itemId || productionForm.quantity <= 0) {
+        return ElMessage.error("请选择仓库和饲料，并填写正确数量");
+      }
+      await createProductionStockOperation({
+        farmId,
+        documentNo: productionForm.recordNo.trim(),
+        operationType: "issue",
+        operationDate: productionForm.occurredOn,
+        warehouseId: productionForm.warehouseId,
+        itemId: productionForm.itemId,
+        quantity: productionForm.quantity,
+        lotNo: productionForm.lotNo.trim() || null,
+        costObjectType: "livestock_batch",
+        costObjectId: batch.id,
+      });
+    } else if (productionType.value === "health") {
+      if (productionForm.description.trim().length < 2) return ElMessage.error("请填写健康事项");
+      await createLivestockHealthRecord({
+        farmId,
+        batchId: batch.id,
+        recordNo: productionForm.recordNo.trim(),
+        recordType: productionForm.healthType,
+        occurredOn: productionForm.occurredOn,
+        description: productionForm.description.trim(),
+        medicineName: productionForm.medicineName.trim() || null,
+        dosage: productionForm.dosage.trim() || null,
+        notes: productionForm.notes.trim() || null,
+      });
+    } else {
+      if (!Number.isInteger(productionForm.sampleCount) || productionForm.sampleCount <= 0 || productionForm.averageWeight <= 0) {
+        return ElMessage.error("抽样头数和平均体重必须大于零");
+      }
+      await createLivestockWeightRecord({
+        farmId,
+        batchId: batch.id,
+        recordNo: productionForm.recordNo.trim(),
+        occurredOn: productionForm.occurredOn,
+        sampleCount: productionForm.sampleCount,
+        averageWeight: productionForm.averageWeight,
+        notes: productionForm.notes.trim() || null,
+      });
+    }
+    ElMessage.success("生产记录已登记");
+    productionDialogVisible.value = false;
+    detailBatch.value = await getLivestockBatch(batch.id);
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    productionSaving.value = false;
+  }
+}
+
 watch(
   () => farmContext.currentFarmId,
   async () => {
@@ -362,6 +481,7 @@ watch(
     entryDialogVisible.value = false;
     movementDialogVisible.value = false;
     detailDialogVisible.value = false;
+    productionDialogVisible.value = false;
     await Promise.all([loadReferences(), loadBatches()]);
   },
   { immediate: true },
@@ -643,15 +763,20 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
         <template v-if="detailBatch">
           <div class="livestock-detail-heading">
             <div class="farm-name-cell"><strong>{{ detailBatch.name }}</strong><span>{{ detailBatch.batchNo }} · {{ detailBatch.entryDate }} 入栏</span></div>
-            <el-tag :type="detailBatch.status === 'ACTIVE' ? 'success' : 'info'" effect="plain">
-              {{ batchStatusName(detailBatch.status) }}
-            </el-tag>
+            <div class="farm-actions">
+              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" type="primary" :icon="Plus" @click="openProduction('feeding')">生产记录</el-button>
+              <el-tag :type="detailBatch.status === 'ACTIVE' ? 'success' : 'info'" effect="plain">{{ batchStatusName(detailBatch.status) }}</el-tag>
+            </div>
           </div>
           <div class="livestock-detail-summary">
             <div><span>初始头数</span><strong>{{ detailBatch.initialCount }} 头</strong></div>
             <div><span>当前存栏</span><strong>{{ detailBatch.currentHeadCount }} 头</strong></div>
             <div><span>死亡 / 淘汰</span><strong>{{ detailBatch.deathCount }} / {{ detailBatch.cullCount }} 头</strong></div>
             <div><span>累计出栏</span><strong>{{ detailBatch.exitCount }} 头</strong></div>
+            <div><span>最近均重</span><strong>{{ detailBatch.productionSummary?.latestAverageWeight ?? "-" }}<template v-if="detailBatch.productionSummary?.latestAverageWeight"> kg</template></strong></div>
+            <div><span>日增重 ADG</span><strong>{{ detailBatch.productionSummary?.adg ?? "-" }}<template v-if="detailBatch.productionSummary?.adg"> kg/天</template></strong></div>
+            <div><span>饲料成本</span><strong>¥ {{ detailBatch.productionSummary?.totalFeedCost ?? "0.00" }}</strong></div>
+            <div><span>健康记录</span><strong>{{ detailBatch.productionSummary?.healthRecordCount ?? 0 }} 条</strong></div>
           </div>
           <section class="livestock-detail-section">
             <header><h2>当前圈舍分布</h2><span>{{ detailBatch.source || "未填写来源" }}</span></header>
@@ -660,6 +785,49 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
                 <el-table-column label="圈舍" min-width="180"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.barnName }}</strong><span>{{ scope.row.barnCode }}</span></div></template></el-table-column>
                 <el-table-column prop="headCount" label="当前头数" width="120" align="right"><template #default="scope"><strong>{{ scope.row.headCount }}</strong> 头</template></el-table-column>
                 <el-table-column prop="barnCapacity" label="设计容量" width="120" align="right"><template #default="scope">{{ scope.row.barnCapacity }} 头</template></el-table-column>
+              </el-table>
+            </div>
+          </section>
+          <section class="livestock-detail-section">
+            <header>
+              <h2>饲喂与领料</h2>
+              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" text type="primary" @click="openProduction('feeding')">登记喂料</el-button>
+            </header>
+            <div class="farm-table-shell">
+              <el-table :data="detailBatch.feedingRecords ?? []" row-key="id" empty-text="暂无饲喂领料记录">
+                <el-table-column label="日期 / 单号" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.operationDate }}</strong><span>{{ scope.row.documentNo }}</span></div></template></el-table-column>
+                <el-table-column label="饲料" min-width="170"><template #default="scope">{{ scope.row.itemName }}（{{ scope.row.itemCode }}）</template></el-table-column>
+                <el-table-column label="仓库" min-width="120" prop="warehouseName" />
+                <el-table-column label="数量" width="110" align="right"><template #default="scope"><strong>{{ scope.row.operationType === 'return' ? '-' : '' }}{{ scope.row.quantity }}</strong> {{ scope.row.unitName }}</template></el-table-column>
+                <el-table-column label="金额" width="110" align="right"><template #default="scope">¥ {{ scope.row.amount }}</template></el-table-column>
+              </el-table>
+            </div>
+          </section>
+          <section class="livestock-detail-section">
+            <header>
+              <h2>健康、防疫与用药</h2>
+              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" text type="primary" @click="openProduction('health')">登记健康</el-button>
+            </header>
+            <div class="farm-table-shell">
+              <el-table :data="detailBatch.healthRecords ?? []" row-key="id" empty-text="暂无健康记录">
+                <el-table-column label="日期 / 单号" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.occurredOn }}</strong><span>{{ scope.row.recordNo }}</span></div></template></el-table-column>
+                <el-table-column label="类型" width="90"><template #default="scope">{{ healthTypeNames[scope.row.recordType as LivestockHealthType] }}</template></el-table-column>
+                <el-table-column label="事项" min-width="180" prop="description" />
+                <el-table-column label="药品 / 剂量" min-width="160"><template #default="scope">{{ scope.row.medicineName || '-' }}<template v-if="scope.row.dosage"> · {{ scope.row.dosage }}</template></template></el-table-column>
+              </el-table>
+            </div>
+          </section>
+          <section class="livestock-detail-section">
+            <header>
+              <h2>称重记录</h2>
+              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" text type="primary" @click="openProduction('weight')">登记称重</el-button>
+            </header>
+            <div class="farm-table-shell">
+              <el-table :data="detailBatch.weightRecords ?? []" row-key="id" empty-text="暂无称重记录">
+                <el-table-column label="日期 / 单号" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.occurredOn }}</strong><span>{{ scope.row.recordNo }}</span></div></template></el-table-column>
+                <el-table-column label="抽样头数" width="110" align="right"><template #default="scope">{{ scope.row.sampleCount }} 头</template></el-table-column>
+                <el-table-column label="平均体重" width="130" align="right"><template #default="scope"><strong>{{ scope.row.averageWeight }}</strong> kg</template></el-table-column>
+                <el-table-column label="备注" min-width="180"><template #default="scope">{{ scope.row.notes || '-' }}</template></el-table-column>
               </el-table>
             </div>
           </section>
@@ -679,6 +847,42 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
       </div>
       <template #footer><el-button @click="detailDialogVisible = false">关闭</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="productionDialogVisible" title="登记生产记录" width="min(94vw, 680px)" destroy-on-close>
+      <el-radio-group v-model="productionType" class="production-type" aria-label="生产记录类型">
+        <el-radio-button value="feeding">喂料</el-radio-button>
+        <el-radio-button value="health">健康 / 用药</el-radio-button>
+        <el-radio-button value="weight">称重</el-radio-button>
+      </el-radio-group>
+      <el-form label-position="top" @submit.prevent="saveProductionRecord">
+        <div class="farm-form-grid">
+          <el-form-item label="记录单号" required><el-input v-model="productionForm.recordNo" maxlength="40" /></el-form-item>
+          <el-form-item label="业务日期" required><el-date-picker v-model="productionForm.occurredOn" type="date" value-format="YYYY-MM-DD" class="full-width-control" :disabled-date="(value: Date) => value.getTime() > Date.now()" /></el-form-item>
+          <template v-if="productionType === 'feeding'">
+            <el-form-item label="领料仓库" required><el-select v-model="productionForm.warehouseId" class="full-width-control"><el-option v-for="item in warehouses" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="饲料" required><el-select v-model="productionForm.itemId" class="full-width-control"><el-option v-for="item in feedItems" :key="item.id" :label="`${item.name} (${item.unitName})`" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="领用数量" required><el-input-number v-model="productionForm.quantity" class="full-width-control" :min="0.001" :precision="3" controls-position="right" /></el-form-item>
+            <el-form-item label="批号"><el-input v-model="productionForm.lotNo" maxlength="64" placeholder="启用批次管理的饲料必填" /></el-form-item>
+          </template>
+          <template v-else-if="productionType === 'health'">
+            <el-form-item label="记录类型" required><el-select v-model="productionForm.healthType" class="full-width-control"><el-option v-for="(label, value) in healthTypeNames" :key="value" :label="label" :value="value" /></el-select></el-form-item>
+            <el-form-item label="健康事项" required><el-input v-model="productionForm.description" maxlength="255" placeholder="例如 猪瘟疫苗首免" /></el-form-item>
+            <el-form-item label="药品 / 疫苗"><el-input v-model="productionForm.medicineName" maxlength="120" /></el-form-item>
+            <el-form-item label="剂量"><el-input v-model="productionForm.dosage" maxlength="80" placeholder="例如 每头 1 头份" /></el-form-item>
+          </template>
+          <template v-else>
+            <el-form-item label="抽样头数" required><el-input-number v-model="productionForm.sampleCount" class="full-width-control" :min="1" :precision="0" controls-position="right" /></el-form-item>
+            <el-form-item label="平均体重（kg）" required><el-input-number v-model="productionForm.averageWeight" class="full-width-control" :min="0.001" :precision="3" controls-position="right" /></el-form-item>
+          </template>
+          <el-form-item v-if="productionType !== 'feeding'" label="备注" class="farm-form-span"><el-input v-model="productionForm.notes" maxlength="500" /></el-form-item>
+        </div>
+      </el-form>
+      <el-alert v-if="productionType === 'feeding' && (!warehouses.length || !feedItems.length)" type="warning" :closable="false" title="请先在库存管理中建立可用仓库和饲料物料，并完成采购入库。" />
+      <template #footer>
+        <el-button @click="productionDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="productionSaving" @click="saveProductionRecord">确认登记</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -696,6 +900,10 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
 
 .livestock-detail {
   min-height: 220px;
+}
+
+.production-type {
+  margin-bottom: 18px;
 }
 
 .livestock-detail-heading,
