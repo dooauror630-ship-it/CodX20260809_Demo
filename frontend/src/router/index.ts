@@ -110,6 +110,12 @@ export const router = createRouter({
           meta: { title: "烟草烘烤" },
         },
         {
+          path: "crop/analysis",
+          name: "crop-analysis",
+          component: () => import("@/modules/crop/CropAnalysisView.vue"),
+          meta: { title: "种植分析" },
+        },
+        {
           path: "admin/users",
           name: "admin-users",
           component: () => import("@/modules/admin/UserManagementView.vue"),

@@ -144,6 +144,10 @@ onMounted(() => void loadFarmContext());
           <el-icon><Tickets /></el-icon>
           <span>烟草烘烤</span>
         </router-link>
+        <router-link to="/crop/analysis" class="sidebar-link">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>种植分析</span>
+        </router-link>
         <router-link v-if="auth.isAdmin" to="/admin/users" class="sidebar-link">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>

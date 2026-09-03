@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0017_tobacco_curing_batches"
+REQUIRED_SCHEMA_REVISION = "0018_grading_records"
 
 
 REQUIRED_SCHEMA = {
@@ -131,6 +131,10 @@ REQUIRED_SCHEMA = {
         "id", "farm_id", "crop_cycle_id", "curing_no", "start_at", "end_at", "input_weight",
         "output_weight", "unit_id", "fuel_cost", "electricity_cost", "status", "notes",
         "created_by_id", "completed_by_id", "created_at",
+    },
+    "grading_records": {
+        "id", "farm_id", "harvest_batch_id", "grade_code", "quantity", "unit_price_reference",
+        "notes", "created_by_id", "created_at",
     },
     "field_operation_inputs": {
         "id", "farm_id", "field_operation_id", "stock_document_id", "item_id", "quantity", "amount",

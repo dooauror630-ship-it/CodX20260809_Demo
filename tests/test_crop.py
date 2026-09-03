@@ -32,6 +32,7 @@ class CropCycleTestCase(unittest.TestCase):
         })
         catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
         self.kg_unit = next(item for item in catalogs["units"] if item["code"] == "KG")
+        self.other_unit = next(item for item in catalogs["units"] if item["id"] != self.kg_unit["id"])
         self.crop_type = next(item for item in catalogs["cropTypes"] if item["code"] == "TOBACCO")
         self.variety = self.crop_type["varieties"][0] if self.crop_type["varieties"] else self.create_variety()
         plot = self.post(self.admin, "/plots", {
@@ -217,6 +218,38 @@ class CropCycleTestCase(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.get_json()["data"]["total"], 1)
 
+    def test_grading_records_enforce_harvest_net_weight(self):
+        cycle = self.post(self.admin, "/crop-cycles", self.cycle_payload()).get_json()["data"]["cycle"]
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "ACTIVE"})
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+        harvest = self.post(self.admin, "/harvest-batches", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "harvestNo": "GRADE-HARVEST",
+            "harvestDate": date.today().isoformat(), "grossWeight": "105", "netWeight": "100",
+            "unitId": self.kg_unit["id"], "warehouseId": self.warehouse["id"],
+        }).get_json()["data"]["batch"]
+        payload = {
+            "farmId": self.farm["id"], "harvestBatchId": harvest["id"], "gradeCode": "c1f",
+            "quantity": "60", "unitPriceReference": "28.5", "notes": "中桔一",
+        }
+        self.assertEqual(self.post(self.viewer, "/grading-records", payload).status_code, 403)
+        created = self.post(self.admin, "/grading-records", payload)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["data"]["record"]["referenceValue"], "1710.00")
+        self.assertEqual(self.post(self.admin, "/grading-records", payload).status_code, 200)
+        duplicate = self.post(self.admin, "/grading-records", {**payload, "quantity": "59"})
+        self.assertEqual(duplicate.status_code, 409)
+        exceeded = self.post(self.admin, "/grading-records", {
+            **payload, "gradeCode": "B2F", "quantity": "41",
+        })
+        self.assertEqual(exceeded.status_code, 409)
+        self.assertEqual(exceeded.get_json()["code"], "GRADING_QUANTITY_EXCEEDED")
+        listed = self.viewer.get("/api/v1/grading-records", query_string={
+            "farmId": self.farm["id"], "harvestBatchId": harvest["id"],
+        }).get_json()["data"]
+        self.assertEqual(listed["gradedQuantity"], "60")
+        self.assertEqual(listed["ungradedQuantity"], "40")
+        self.assertEqual(listed["referenceValue"], "1710.00")
+
     def test_tobacco_curing_lifecycle_and_weight_limits(self):
         start_at = datetime.now().replace(microsecond=0) - timedelta(hours=2)
         end_at = start_at + timedelta(hours=1)
@@ -270,6 +303,85 @@ class CropCycleTestCase(unittest.TestCase):
         })
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.get_json()["data"]["total"], 1)
+
+    def test_analysis_zero_state_and_close_requires_harvest(self):
+        cycle = self.post(self.admin, "/crop-cycles", self.cycle_payload()).get_json()["data"]["cycle"]
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "ACTIVE"})
+        direct_close = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "CLOSED"})
+        self.assertEqual(direct_close.status_code, 409)
+        self.assertEqual(direct_close.get_json()["code"], "CROP_CYCLE_STATUS_INVALID")
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+        close = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "CLOSED"})
+        self.assertEqual(close.status_code, 409)
+        self.assertEqual(close.get_json()["code"], "CROP_CYCLE_CLOSE_REQUIRES_HARVEST")
+
+        analysis = self.viewer.get(f"/api/v1/crop-cycles/{cycle['id']}/analysis")
+        self.assertEqual(analysis.status_code, 200)
+        data = analysis.get_json()["data"]
+        self.assertIsNone(data["unitName"])
+        self.assertEqual(data["harvest"]["totalNetWeight"], "0.00")
+        self.assertEqual(data["harvest"]["yieldPerMu"], "0.00")
+        self.assertEqual(data["grading"]["gradeStructure"], [])
+        self.assertEqual(data["cost"]["unitOutputCost"], "0.00")
+
+    def test_analysis_aggregates_production_and_close_gates_curing(self):
+        start_at = datetime.now().replace(microsecond=0) - timedelta(hours=2)
+        cycle = self.post(self.admin, "/crop-cycles", self.cycle_payload(
+            start=(date.today() - timedelta(days=1)).isoformat(),
+        )).get_json()["data"]["cycle"]
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {
+            "status": "ACTIVE", "actualStartDate": (date.today() - timedelta(days=1)).isoformat(),
+        })
+        self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+        harvest_payload = {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "harvestNo": "ANALYSIS-01",
+            "harvestDate": date.today().isoformat(), "grossWeight": "105", "netWeight": "100",
+            "unitId": self.kg_unit["id"], "warehouseId": self.warehouse["id"],
+        }
+        harvest = self.post(self.admin, "/harvest-batches", harvest_payload).get_json()["data"]["batch"]
+        mismatched = self.post(self.admin, "/harvest-batches", {
+            **harvest_payload, "harvestNo": "ANALYSIS-02", "unitId": self.other_unit["id"],
+        })
+        self.assertEqual(mismatched.status_code, 409)
+        self.assertEqual(mismatched.get_json()["code"], "HARVEST_UNIT_MISMATCH")
+        self.post(self.admin, "/field-operations", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "operationType": "OTHER",
+            "operationDate": date.today().isoformat(), "areaMu": "40", "laborCost": "200",
+            "serviceCost": "50",
+        })
+        for grade_code, quantity, price in (("C1F", "60", "28.5"), ("B2F", "20", "20")):
+            self.post(self.admin, "/grading-records", {
+                "farmId": self.farm["id"], "harvestBatchId": harvest["id"], "gradeCode": grade_code,
+                "quantity": quantity, "unitPriceReference": price,
+            })
+        curing = self.post(self.admin, "/tobacco-curing-batches", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "curingNo": "ANALYSIS-CURING",
+            "startAt": start_at.isoformat(), "inputWeight": "80", "unitId": self.kg_unit["id"],
+        }).get_json()["data"]["batch"]
+        close = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "CLOSED"})
+        self.assertEqual(close.status_code, 409)
+        self.assertEqual(close.get_json()["code"], "CROP_CYCLE_CLOSE_CURING_IN_PROGRESS")
+        self.patch(self.admin, f"/tobacco-curing-batches/{curing['id']}/complete", {
+            "endAt": (start_at + timedelta(hours=1)).isoformat(), "outputWeight": "40",
+            "fuelCost": "120", "electricityCost": "35",
+        })
+
+        analysis = self.viewer.get(f"/api/v1/crop-cycles/{cycle['id']}/analysis").get_json()["data"]
+        self.assertEqual(analysis["unitName"], self.kg_unit["name"])
+        self.assertEqual(analysis["harvest"], {
+            "batchCount": 1, "totalNetWeight": "100.00", "yieldPerMu": "2.50",
+        })
+        self.assertEqual(analysis["curing"]["efficiency"], "50.00")
+        self.assertEqual(analysis["grading"]["gradedQuantity"], "80.00")
+        self.assertEqual(analysis["grading"]["ungradedQuantity"], "20.00")
+        self.assertEqual(analysis["grading"]["gradingRate"], "80.00")
+        self.assertEqual(analysis["grading"]["referenceValue"], "2110.00")
+        self.assertEqual(analysis["grading"]["gradeStructure"][0]["gradeCode"], "B2F")
+        self.assertEqual(analysis["cost"]["totalCost"], "405.00")
+        self.assertEqual(analysis["cost"]["unitOutputCost"], "4.05")
+        closed = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "CLOSED"})
+        self.assertEqual(closed.status_code, 200)
+        self.assertEqual(closed.get_json()["data"]["cycle"]["status"], "CLOSED")
 
 
 if __name__ == "__main__":

@@ -15,14 +15,14 @@ from ..farm.service import get_accessible_farm
 from ..catalog.models import Unit
 from ..inventory.models import Item, StockDocument, StockMovementLine
 from ..inventory.purchase_service import _require_write_access
-from .models import CropCycle, FieldOperation, FieldOperationInput, HarvestBatch, TobaccoCuringBatch
+from .models import CropCycle, FieldOperation, FieldOperationInput, GradingRecord, HarvestBatch, TobaccoCuringBatch
 from ..inventory.models import Warehouse
 
 
 OPEN_STATUSES = ("PLANNED", "ACTIVE", "HARVESTING")
 TRANSITIONS = {
     "PLANNED": {"ACTIVE", "CANCELLED"},
-    "ACTIVE": {"HARVESTING", "CLOSED", "CANCELLED"},
+    "ACTIVE": {"HARVESTING", "CANCELLED"},
     "HARVESTING": {"CLOSED", "CANCELLED"},
     "CLOSED": set(),
     "CANCELLED": set(),
@@ -203,6 +203,83 @@ def crop_cycle_cost_summary(cycle_id, actor):
     }
 
 
+def crop_cycle_analysis(cycle_id, actor):
+    cycle = db.session.get(CropCycle, cycle_id)
+    if cycle is None:
+        raise ApiError("种植周期不存在", 404, "CROP_CYCLE_NOT_FOUND")
+    get_accessible_farm(cycle.farm_id, actor)
+    crop_type = db.session.get(CropType, cycle.crop_type_id)
+    harvests = db.session.scalars(
+        select(HarvestBatch).where(HarvestBatch.crop_cycle_id == cycle.id)
+    ).all()
+    unit = db.session.get(Unit, harvests[0].unit_id) if harvests else None
+    total_harvest = sum((Decimal(item.net_weight) for item in harvests), Decimal("0"))
+    curing_batches = db.session.scalars(
+        select(TobaccoCuringBatch).where(TobaccoCuringBatch.crop_cycle_id == cycle.id)
+    ).all()
+    total_curing_input = sum((Decimal(item.input_weight) for item in curing_batches), Decimal("0"))
+    total_curing_output = sum(
+        (Decimal(item.output_weight or 0) for item in curing_batches), Decimal("0")
+    )
+    grading_records = db.session.execute(
+        select(GradingRecord).join(HarvestBatch).where(HarvestBatch.crop_cycle_id == cycle.id)
+    ).scalars().all()
+    total_graded = sum((Decimal(item.quantity) for item in grading_records), Decimal("0"))
+    reference_value = sum(
+        (item.quantity * item.unit_price_reference for item in grading_records), Decimal("0")
+    )
+    grades = {}
+    for record in grading_records:
+        quantity, value = grades.get(record.grade_code, (Decimal("0"), Decimal("0")))
+        grades[record.grade_code] = (
+            quantity + record.quantity,
+            value + record.quantity * record.unit_price_reference,
+        )
+    costs = crop_cycle_cost_summary(cycle.id, actor)
+    total_cost = Decimal(costs["totalCost"])
+    return {
+        "cropCycleId": cycle.id,
+        "cycleCode": cycle.cycle_code,
+        "cropTypeName": crop_type.name,
+        "status": cycle.status,
+        "areaMu": _decimal_text(cycle.area_mu),
+        "unitName": unit.name if unit else None,
+        "harvest": {
+            "batchCount": len(harvests),
+            "totalNetWeight": format(total_harvest, ".2f"),
+            "yieldPerMu": format(total_harvest / cycle.area_mu if cycle.area_mu else 0, ".2f"),
+        },
+        "curing": {
+            "batchCount": len(curing_batches),
+            "completedBatchCount": sum(item.status == "COMPLETED" for item in curing_batches),
+            "totalInputWeight": format(total_curing_input, ".2f"),
+            "totalOutputWeight": format(total_curing_output, ".2f"),
+            "efficiency": format(
+                total_curing_output / total_curing_input * 100 if total_curing_input else 0, ".2f"
+            ),
+        },
+        "grading": {
+            "gradedQuantity": format(total_graded, ".2f"),
+            "ungradedQuantity": format(max(total_harvest - total_graded, Decimal("0")), ".2f"),
+            "gradingRate": format(total_graded / total_harvest * 100 if total_harvest else 0, ".2f"),
+            "referenceValue": format(reference_value, ".2f"),
+            "gradeStructure": [
+                {
+                    "gradeCode": code,
+                    "quantity": format(quantity, ".2f"),
+                    "percentage": format(quantity / total_graded * 100 if total_graded else 0, ".2f"),
+                    "referenceValue": format(value, ".2f"),
+                }
+                for code, (quantity, value) in sorted(grades.items())
+            ],
+        },
+        "cost": {
+            **costs,
+            "unitOutputCost": format(total_cost / total_harvest if total_harvest else 0, ".2f"),
+        },
+    }
+
+
 def create_crop_cycle(payload, actor):
     _require_write_access(payload.farm_id, actor)
     existing = db.session.scalar(select(CropCycle).where(
@@ -242,6 +319,17 @@ def update_crop_cycle_status(cycle_id, payload, actor):
     _require_write_access(cycle.farm_id, actor)
     if payload.status not in TRANSITIONS[cycle.status] and payload.status != cycle.status:
         raise ApiError("种植周期状态不能从当前状态变更", 409, "CROP_CYCLE_STATUS_INVALID", "status")
+    if payload.status == "CLOSED" and cycle.status != "CLOSED":
+        harvest_count = db.session.scalar(
+            select(func.count(HarvestBatch.id)).where(HarvestBatch.crop_cycle_id == cycle.id)
+        ) or 0
+        if not harvest_count:
+            raise ApiError("至少登记一个采收批次后才能关闭周期", 409, "CROP_CYCLE_CLOSE_REQUIRES_HARVEST")
+        curing_statuses = db.session.scalars(
+            select(TobaccoCuringBatch.status).where(TobaccoCuringBatch.crop_cycle_id == cycle.id)
+        ).all()
+        if "IN_PROGRESS" in curing_statuses:
+            raise ApiError("存在进行中的烘烤批次，不能关闭周期", 409, "CROP_CYCLE_CLOSE_CURING_IN_PROGRESS")
     actual_start = payload.actual_start_date
     actual_end = payload.actual_end_date
     if payload.status == "PLANNED":
@@ -575,7 +663,9 @@ def list_harvest_batches(query, actor):
 
 def create_harvest_batch(payload, actor):
     _require_write_access(payload.farm_id, actor)
-    cycle = db.session.get(CropCycle, payload.crop_cycle_id)
+    cycle = db.session.scalar(
+        select(CropCycle).where(CropCycle.id == payload.crop_cycle_id).with_for_update()
+    )
     if cycle is None:
         raise ApiError("种植周期不存在", 404, "CROP_CYCLE_NOT_FOUND", "cropCycleId")
     if cycle.farm_id != payload.farm_id:
@@ -605,6 +695,11 @@ def create_harvest_batch(payload, actor):
         if not same:
             raise ApiError("采收批号已存在且内容不同", 409, "HARVEST_NO_EXISTS", "harvestNo")
         return _harvest_payload(existing, unit, warehouse), False
+    existing_unit_id = db.session.scalar(
+        select(HarvestBatch.unit_id).where(HarvestBatch.crop_cycle_id == cycle.id).limit(1)
+    )
+    if existing_unit_id is not None and existing_unit_id != unit.id:
+        raise ApiError("同一种植周期的采收批次必须使用相同计量单位", 409, "HARVEST_UNIT_MISMATCH", "unitId")
     batch = HarvestBatch(farm_id=payload.farm_id, crop_cycle_id=cycle.id, harvest_no=payload.harvest_no, harvest_date=payload.harvest_date, gross_weight=payload.gross_weight, net_weight=payload.net_weight, unit_id=unit.id, warehouse_id=warehouse.id, notes=payload.notes, created_by_id=actor.id)
     db.session.add(batch)
     try:
@@ -706,3 +801,72 @@ def complete_tobacco_curing_batch(batch_id, payload, actor):
     batch.status, batch.completed_by_id = "COMPLETED", actor.id
     db.session.commit()
     return _curing_payload(batch, unit)
+
+
+def _grading_payload(record, harvest, unit):
+    reference_value = record.quantity * record.unit_price_reference
+    return {
+        "id": record.id, "farmId": record.farm_id, "harvestBatchId": record.harvest_batch_id,
+        "harvestNo": harvest.harvest_no, "gradeCode": record.grade_code,
+        "quantity": _decimal_text(record.quantity), "unitName": unit.name,
+        "unitPriceReference": _decimal_text(record.unit_price_reference),
+        "referenceValue": format(reference_value, ".2f"), "notes": record.notes,
+        "createdAt": format_datetime(record.created_at),
+    }
+
+
+def _grading_harvest(farm_id, harvest_batch_id, lock=False):
+    statement = select(HarvestBatch).where(HarvestBatch.id == harvest_batch_id)
+    harvest = db.session.scalar(statement.with_for_update() if lock else statement)
+    if harvest is None:
+        raise ApiError("采收批次不存在", 404, "HARVEST_BATCH_NOT_FOUND", "harvestBatchId")
+    if harvest.farm_id != farm_id:
+        raise ApiError("采收批次不属于当前农场", 409, "HARVEST_BATCH_FARM_MISMATCH", "harvestBatchId")
+    return harvest
+
+
+def list_grading_records(query, actor):
+    get_accessible_farm(query.farm_id, actor)
+    harvest = _grading_harvest(query.farm_id, query.harvest_batch_id)
+    unit = db.session.get(Unit, harvest.unit_id)
+    records = db.session.scalars(
+        select(GradingRecord).where(GradingRecord.harvest_batch_id == harvest.id)
+        .order_by(GradingRecord.grade_code, GradingRecord.id)
+    ).all()
+    graded = sum((Decimal(record.quantity) for record in records), Decimal("0"))
+    reference_value = sum((record.quantity * record.unit_price_reference for record in records), Decimal("0"))
+    return {
+        "items": [_grading_payload(record, harvest, unit) for record in records],
+        "total": len(records), "harvestNetWeight": _decimal_text(harvest.net_weight),
+        "gradedQuantity": _decimal_text(graded),
+        "ungradedQuantity": _decimal_text(max(harvest.net_weight - graded, Decimal("0"))),
+        "unitName": unit.name, "referenceValue": format(reference_value, ".2f"),
+    }
+
+
+def create_grading_record(payload, actor):
+    _require_write_access(payload.farm_id, actor)
+    harvest = _grading_harvest(payload.farm_id, payload.harvest_batch_id, lock=True)
+    cycle = db.session.get(CropCycle, harvest.crop_cycle_id)
+    if cycle.status != "HARVESTING":
+        raise ApiError("只有采收中周期才能登记分级", 409, "CROP_CYCLE_GRADING_STATUS_INVALID")
+    unit = db.session.get(Unit, harvest.unit_id)
+    existing = db.session.scalar(select(GradingRecord).where(
+        GradingRecord.harvest_batch_id == harvest.id, GradingRecord.grade_code == payload.grade_code,
+    ))
+    if existing is not None:
+        if existing.quantity != payload.quantity or existing.unit_price_reference != payload.unit_price_reference or existing.notes != payload.notes:
+            raise ApiError("该采收批次等级已存在且内容不同", 409, "GRADING_GRADE_EXISTS", "gradeCode")
+        return _grading_payload(existing, harvest, unit), False
+    graded = Decimal(db.session.scalar(select(func.coalesce(func.sum(GradingRecord.quantity), 0)).where(GradingRecord.harvest_batch_id == harvest.id)) or 0)
+    available = harvest.net_weight - graded
+    if payload.quantity > available:
+        raise ApiError("分级数量超过采收批次未分级净重", 409, "GRADING_QUANTITY_EXCEEDED", "quantity", {"available": _decimal_text(max(available, Decimal("0")))})
+    record = GradingRecord(farm_id=payload.farm_id, harvest_batch_id=harvest.id, grade_code=payload.grade_code, quantity=payload.quantity, unit_price_reference=payload.unit_price_reference, notes=payload.notes, created_by_id=actor.id)
+    db.session.add(record)
+    try:
+        db.session.commit()
+    except IntegrityError as error:
+        db.session.rollback()
+        raise ApiError("分级记录登记冲突，请刷新后重试", 409, "GRADING_CONFLICT") from error
+    return _grading_payload(record, harvest, unit), True

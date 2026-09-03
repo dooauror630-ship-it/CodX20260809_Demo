@@ -606,6 +606,15 @@ class PurchaseInventoryTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json()["code"], "COST_OBJECT_FARM_MISMATCH")
 
+        harvesting = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+        self.assertEqual(harvesting.status_code, 200)
+        kg_unit = next(item for item in catalogs["units"] if item["code"] == "KG")
+        harvest = self.post(self.manager, "/harvest-batches", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "harvestNo": "CROP-STOCK-HARVEST",
+            "harvestDate": "2026-08-31", "grossWeight": "1", "netWeight": "1",
+            "unitId": kg_unit["id"], "warehouseId": self.warehouse["id"],
+        })
+        self.assertEqual(harvest.status_code, 201)
         closed = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {
             "status": "CLOSED", "actualStartDate": "2026-08-01", "actualEndDate": "2026-08-31",
         })

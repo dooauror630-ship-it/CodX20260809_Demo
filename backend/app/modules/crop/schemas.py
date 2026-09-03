@@ -194,3 +194,29 @@ class CompleteTobaccoCuringBatchPayload(BaseModel):
         if value.tzinfo is not None:
             raise ValueError("timezone offset is not supported")
         return value
+
+
+class GradingRecordListQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+    farm_id: int = Field(alias="farmId", gt=0)
+    harvest_batch_id: int = Field(alias="harvestBatchId", gt=0)
+
+
+class CreateGradingRecordPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+    farm_id: StrictInt = Field(alias="farmId", gt=0)
+    harvest_batch_id: StrictInt = Field(alias="harvestBatchId", gt=0)
+    grade_code: StrictStr = Field(alias="gradeCode", min_length=1, max_length=30, pattern=r"^[A-Za-z0-9_-]+$")
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
+    unit_price_reference: Decimal = Field(default=Decimal("0"), alias="unitPriceReference", ge=0, max_digits=16, decimal_places=4)
+    notes: StrictStr | None = Field(default=None, max_length=500)
+
+    @field_validator("grade_code")
+    @classmethod
+    def normalize_grade(cls, value):
+        return value.upper()
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value):
+        return value or None

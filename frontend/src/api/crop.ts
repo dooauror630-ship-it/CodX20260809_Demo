@@ -2,6 +2,7 @@ import { apiClient } from "./client";
 import type {
   AvailableFieldOperationInput,
   CropCycle,
+  CropCycleAnalysis,
   CropCycleCostSummary,
   CropCycleListData,
   CropCycleListQuery,
@@ -11,6 +12,8 @@ import type {
   FieldOperationInput,
   FieldOperationType,
   HarvestBatch,
+  GradingRecord,
+  GradingRecordData,
   TobaccoCuringBatch,
 } from "@/types/crop";
 
@@ -49,6 +52,17 @@ export async function completeTobaccoCuringBatch(batchId: number, input: {
   return (await apiClient.patch<DataResponse<{ batch: TobaccoCuringBatch }>>(`/tobacco-curing-batches/${batchId}/complete`, input)).data.data.batch;
 }
 
+export async function getGradingRecords(query: { farmId: number; harvestBatchId: number }) {
+  return (await apiClient.get<DataResponse<GradingRecordData>>("/grading-records", { params: query })).data.data;
+}
+
+export async function createGradingRecord(input: {
+  farmId: number; harvestBatchId: number; gradeCode: string; quantity: number;
+  unitPriceReference: number; notes?: string | null;
+}) {
+  return (await apiClient.post<DataResponse<{ record: GradingRecord }>>("/grading-records", input)).data.data.record;
+}
+
 export async function getCropCycles(query: CropCycleListQuery) {
   return (
     await apiClient.get<DataResponse<CropCycleListData>>("/crop-cycles", {
@@ -82,6 +96,14 @@ export async function getCropCycleCostSummary(cycleId: number) {
   return (
     await apiClient.get<DataResponse<CropCycleCostSummary>>(
       `/crop-cycles/${cycleId}/cost-summary`,
+    )
+  ).data.data;
+}
+
+export async function getCropCycleAnalysis(cycleId: number) {
+  return (
+    await apiClient.get<DataResponse<CropCycleAnalysis>>(
+      `/crop-cycles/${cycleId}/analysis`,
     )
   ).data.data;
 }

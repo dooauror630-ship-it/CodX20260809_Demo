@@ -169,3 +169,24 @@ class TobaccoCuringBatch(db.Model):
     created_by_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     completed_by_id: Mapped[int | None] = mapped_column(USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class GradingRecord(db.Model):
+    __tablename__ = "grading_records"
+    __table_args__ = (
+        UniqueConstraint("harvest_batch_id", "grade_code", name="uq_grading_records_harvest_grade"),
+        CheckConstraint("quantity > 0", name="ck_grading_records_quantity_positive"),
+        CheckConstraint("unit_price_reference >= 0", name="ck_grading_records_price_nonnegative"),
+        Index("ix_grading_records_harvest", "harvest_batch_id", "id"),
+        Index("ix_grading_records_farm_grade", "farm_id", "grade_code"),
+    )
+
+    id: Mapped[int] = mapped_column(USER_ID_TYPE, primary_key=True, autoincrement=True)
+    farm_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("farms.id", ondelete="RESTRICT"), nullable=False)
+    harvest_batch_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("harvest_batches.id", ondelete="RESTRICT"), nullable=False)
+    grade_code: Mapped[str] = mapped_column(String(30), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_price_reference: Mapped[Decimal] = mapped_column(Numeric(16, 4), nullable=False, default=0, server_default="0")
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())

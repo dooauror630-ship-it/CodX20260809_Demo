@@ -13,12 +13,14 @@ from .schemas import (
     UpdateCropCycleStatusPayload,
     CreateHarvestBatchPayload, HarvestBatchListQuery,
     CompleteTobaccoCuringBatchPayload, CreateTobaccoCuringBatchPayload, TobaccoCuringBatchListQuery,
+    CreateGradingRecordPayload, GradingRecordListQuery,
 )
 from .service import (
     create_crop_cycle,
     create_field_operation,
     create_field_operation_input,
     get_crop_cycle,
+    crop_cycle_analysis,
     crop_cycle_cost_summary,
     list_crop_cycles,
     list_field_operations,
@@ -27,6 +29,7 @@ from .service import (
     update_crop_cycle_status,
     create_harvest_batch, list_harvest_batches,
     complete_tobacco_curing_batch, create_tobacco_curing_batch, list_tobacco_curing_batches,
+    create_grading_record, list_grading_records,
 )
 
 
@@ -50,6 +53,12 @@ def crop_cycle_detail(cycle_id):
 @login_required
 def crop_cycle_cost(cycle_id):
     return success_response(crop_cycle_cost_summary(cycle_id, g.current_user))
+
+
+@crop_bp.get("/crop-cycles/<int:cycle_id>/analysis")
+@login_required
+def crop_cycle_analysis_overview(cycle_id):
+    return success_response(crop_cycle_analysis(cycle_id, g.current_user))
 
 
 @crop_bp.post("/crop-cycles")
@@ -146,3 +155,18 @@ def add_tobacco_curing_batch():
 def complete_curing_batch(batch_id):
     payload = parse_payload(CompleteTobaccoCuringBatchPayload, request.get_json(silent=True), "烘烤完成信息格式错误")
     return success_response({"batch": complete_tobacco_curing_batch(batch_id, payload, g.current_user)}, "烘烤批次已完成")
+
+
+@crop_bp.get("/grading-records")
+@login_required
+def grading_records():
+    query = parse_payload(GradingRecordListQuery, request.args.to_dict(), "分级记录筛选条件格式错误")
+    return success_response(list_grading_records(query, g.current_user))
+
+
+@crop_bp.post("/grading-records")
+@login_required
+def add_grading_record():
+    payload = parse_payload(CreateGradingRecordPayload, request.get_json(silent=True), "分级记录信息格式错误")
+    record, created = create_grading_record(payload, g.current_user)
+    return success_response({"record": record}, "分级记录已登记" if created else "该等级已登记", 201 if created else 200)

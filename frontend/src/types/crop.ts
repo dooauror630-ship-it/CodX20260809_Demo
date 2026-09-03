@@ -44,6 +44,40 @@ export interface CropCycleCostSummary {
   operationCount: number;
 }
 
+export interface CropCycleAnalysis {
+  cropCycleId: number;
+  cycleCode: string;
+  cropTypeName: string;
+  status: CropCycleStatus;
+  areaMu: string;
+  unitName: string | null;
+  harvest: {
+    batchCount: number;
+    totalNetWeight: string;
+    yieldPerMu: string;
+  };
+  curing: {
+    batchCount: number;
+    completedBatchCount: number;
+    totalInputWeight: string;
+    totalOutputWeight: string;
+    efficiency: string;
+  };
+  grading: {
+    gradedQuantity: string;
+    ungradedQuantity: string;
+    gradingRate: string;
+    referenceValue: string;
+    gradeStructure: Array<{
+      gradeCode: string;
+      quantity: string;
+      percentage: string;
+      referenceValue: string;
+    }>;
+  };
+  cost: CropCycleCostSummary & { unitOutputCost: string };
+}
+
 export interface CropCycleListQuery {
   farmId: number;
   page: number;
@@ -144,4 +178,28 @@ export interface TobaccoCuringBatch {
   curingEfficiency: string | null;
   notes: string | null;
   createdAt: string | null;
+}
+
+export interface GradingRecord {
+  id: number;
+  farmId: number;
+  harvestBatchId: number;
+  harvestNo: string;
+  gradeCode: string;
+  quantity: string;
+  unitName: string;
+  unitPriceReference: string;
+  referenceValue: string;
+  notes: string | null;
+  createdAt: string | null;
+}
+
+export interface GradingRecordData {
+  items: GradingRecord[];
+  total: number;
+  harvestNetWeight: string;
+  gradedQuantity: string;
+  ungradedQuantity: string;
+  unitName: string;
+  referenceValue: string;
 }
