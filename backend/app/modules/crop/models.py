@@ -1,11 +1,35 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...extensions import db
 from ..auth.models import USER_ID_TYPE
+
+
+class CropOperationTemplate(db.Model):
+    __tablename__ = "crop_operation_templates"
+    __table_args__ = (
+        UniqueConstraint("crop_type_id", "operation_type", name="uq_crop_operation_templates_type_operation"),
+        CheckConstraint(
+            "operation_type IN ('LAND_PREPARATION', 'SOWING', 'TRANSPLANTING', 'IRRIGATION', "
+            "'FERTILIZATION', 'PEST_CONTROL', 'WEEDING', 'OTHER')",
+            name="ck_crop_operation_templates_type",
+        ),
+        CheckConstraint("offset_days >= 0", name="ck_crop_operation_templates_offset_nonnegative"),
+        Index("ix_crop_operation_templates_crop_offset", "crop_type_id", "offset_days", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(USER_ID_TYPE, primary_key=True, autoincrement=True)
+    crop_type_id: Mapped[int] = mapped_column(
+        USER_ID_TYPE, ForeignKey("crop_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    operation_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    offset_days: Mapped[int] = mapped_column(nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    default_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
 
 
 class CropCycle(db.Model):

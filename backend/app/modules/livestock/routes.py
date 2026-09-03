@@ -38,7 +38,7 @@ def livestock_batches():
 @livestock_bp.get("/livestock-analysis")
 @login_required
 def livestock_analysis_overview():
-    query = parse_payload(LivestockAnalysisQuery, request.args.to_dict(), "生猪分析筛选条件格式错误")
+    query = parse_payload(LivestockAnalysisQuery, request.args.to_dict(), "养殖分析筛选条件格式错误")
     return success_response(livestock_analysis(query, g.current_user))
 
 
@@ -51,11 +51,11 @@ def livestock_batch(batch_id):
 @livestock_bp.post("/livestock-batches")
 @login_required
 def add_livestock_batch():
-    payload = parse_payload(CreateLivestockBatchPayload, request.get_json(silent=True), "生猪批次入栏信息格式错误")
+    payload = parse_payload(CreateLivestockBatchPayload, request.get_json(silent=True), "养殖批次入栏信息格式错误")
     batch, created = create_livestock_batch(payload, g.current_user)
     return success_response(
         {"batch": batch},
-        "生猪批次已入栏" if created else "该生猪批次已入栏",
+        "养殖批次已入栏" if created else "该养殖批次已入栏",
         201 if created else 200,
     )
 
@@ -63,7 +63,7 @@ def add_livestock_batch():
 @livestock_bp.post("/livestock-movements")
 @login_required
 def add_livestock_movement():
-    payload = parse_payload(CreateLivestockMovementPayload, request.get_json(silent=True), "生猪存栏变动信息格式错误")
+    payload = parse_payload(CreateLivestockMovementPayload, request.get_json(silent=True), "养殖存栏变动信息格式错误")
     movement, batch, created = create_livestock_movement(payload, g.current_user)
     return success_response(
         {"movement": movement, "batch": batch},
@@ -75,7 +75,7 @@ def add_livestock_movement():
 @livestock_bp.post("/livestock-health-records")
 @login_required
 def add_livestock_health_record():
-    payload = parse_payload(CreateLivestockHealthRecordPayload, request.get_json(silent=True), "生猪健康记录格式错误")
+    payload = parse_payload(CreateLivestockHealthRecordPayload, request.get_json(silent=True), "养殖健康记录格式错误")
     record, created = create_livestock_health_record(payload, g.current_user)
     return success_response(
         {"record": record},
@@ -87,7 +87,7 @@ def add_livestock_health_record():
 @livestock_bp.post("/livestock-weight-records")
 @login_required
 def add_livestock_weight_record():
-    payload = parse_payload(CreateLivestockWeightRecordPayload, request.get_json(silent=True), "生猪称重记录格式错误")
+    payload = parse_payload(CreateLivestockWeightRecordPayload, request.get_json(silent=True), "养殖称重记录格式错误")
     record, created = create_livestock_weight_record(payload, g.current_user)
     return success_response(
         {"record": record},
@@ -99,7 +99,7 @@ def add_livestock_weight_record():
 @livestock_bp.post("/livestock-cost-entries")
 @login_required
 def add_livestock_cost_entry():
-    payload = parse_payload(CreateLivestockCostEntryPayload, request.get_json(silent=True), "生猪成本记录格式错误")
+    payload = parse_payload(CreateLivestockCostEntryPayload, request.get_json(silent=True), "养殖成本记录格式错误")
     entry, created = create_livestock_cost_entry(payload, g.current_user)
     return success_response(
         {"costEntry": entry},

@@ -4,15 +4,17 @@ import { ElMessage } from "element-plus";
 import { ref, watch } from "vue";
 
 import { errorMessage } from "@/api/client";
-import { getCropCycleAnalysis, getCropCycles } from "@/api/crop";
+import { getCropCycleAnalysis, getCropCycles, getCropFarmAnalysis } from "@/api/crop";
 import { useFarmStore } from "@/stores/farm";
-import type { CropCycle, CropCycleAnalysis } from "@/types/crop";
+import type { CropAnalysisComparison, CropCycle, CropCycleAnalysis } from "@/types/crop";
 
 const farmStore = useFarmStore();
 const loading = ref(false);
+const comparisonLoading = ref(false);
 const cycles = ref<CropCycle[]>([]);
 const selectedCycleId = ref<number | null>(null);
 const analysis = ref<CropCycleAnalysis | null>(null);
+const comparisons = ref<CropAnalysisComparison[]>([]);
 
 async function loadCycles() {
   const farmId = farmStore.currentFarmId;
@@ -45,10 +47,27 @@ async function loadAnalysis() {
   }
 }
 
+async function loadComparison() {
+  const farmId = farmStore.currentFarmId;
+  if (!farmId) {
+    comparisons.value = [];
+    return;
+  }
+  comparisonLoading.value = true;
+  try {
+    comparisons.value = (await getCropFarmAnalysis(farmId)).items;
+  } catch (error) {
+    comparisons.value = [];
+    ElMessage.error(errorMessage(error));
+  } finally {
+    comparisonLoading.value = false;
+  }
+}
+
 async function load() {
   try {
     await loadCycles();
-    await loadAnalysis();
+    await Promise.all([loadAnalysis(), loadComparison()]);
   } catch (error) {
     ElMessage.error(errorMessage(error));
   }
@@ -121,6 +140,22 @@ watch(() => farmStore.currentFarmId, () => void load(), { immediate: true });
           </el-table>
         </div>
       </div>
+      <div class="farm-table-shell comparison-table">
+        <div class="analysis-heading"><h2>多作物周期对比</h2><span>最近 20 个采收中或已关闭周期</span></div>
+        <el-table v-loading="comparisonLoading" :data="comparisons" row-key="cycleId" empty-text="暂无可对比周期">
+          <el-table-column label="周期 / 作物" min-width="180">
+            <template #default="scope"><strong>{{ scope.row.cycleCode }}</strong><br /><span class="table-secondary">{{ scope.row.cropTypeName }} · {{ scope.row.plotName }}</span></template>
+          </el-table-column>
+          <el-table-column label="面积" width="100" align="right"><template #default="scope">{{ scope.row.areaMu }} 亩</template></el-table-column>
+          <el-table-column label="净产量" min-width="130" align="right"><template #default="scope">{{ scope.row.totalNetWeight }} {{ scope.row.unitName ?? "" }}</template></el-table-column>
+          <el-table-column label="亩产" min-width="140" align="right"><template #default="scope">{{ scope.row.yieldPerMu }} {{ scope.row.unitName ?? "" }}/亩</template></el-table-column>
+          <el-table-column label="总成本" min-width="120" align="right"><template #default="scope">¥ {{ scope.row.totalCost }}</template></el-table-column>
+          <el-table-column label="亩均成本" min-width="120" align="right"><template #default="scope">¥ {{ scope.row.costPerMu }}</template></el-table-column>
+          <el-table-column label="单位成本" min-width="140" align="right"><template #default="scope">¥ {{ scope.row.unitOutputCost }}/{{ scope.row.unitName ?? "单位" }}</template></el-table-column>
+          <el-table-column label="分级率" width="100" align="right"><template #default="scope">{{ scope.row.gradingRate }}%</template></el-table-column>
+          <el-table-column label="参考价值" min-width="120" align="right"><template #default="scope">¥ {{ scope.row.referenceValue }}</template></el-table-column>
+        </el-table>
+      </div>
     </template>
   </section>
 </template>
@@ -131,5 +166,6 @@ watch(() => farmStore.currentFarmId, () => void load(), { immediate: true });
 .analysis-grid h2, .analysis-heading h2 { margin: 0 0 12px; font-size: 16px; }
 .analysis-heading { display: flex; align-items: baseline; justify-content: space-between; padding: 18px 20px 0; }
 .analysis-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
+.comparison-table { margin-top: 20px; }
 @media (max-width: 760px) { .analysis-grid { grid-template-columns: 1fr; } }
 </style>

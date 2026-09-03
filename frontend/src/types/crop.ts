@@ -78,6 +78,34 @@ export interface CropCycleAnalysis {
   cost: CropCycleCostSummary & { unitOutputCost: string };
 }
 
+export interface CropOperationSuggestion {
+  templateId: number;
+  operationType: FieldOperationType;
+  offsetDays: number;
+  required: boolean;
+  defaultNotes: string | null;
+  suggestedDate: string;
+  recorded: boolean;
+  overdue: boolean;
+}
+
+export interface CropAnalysisComparison {
+  cycleId: number;
+  cycleCode: string;
+  cropTypeName: string;
+  plotName: string;
+  status: CropCycleStatus;
+  areaMu: string;
+  unitName: string | null;
+  totalNetWeight: string;
+  yieldPerMu: string;
+  totalCost: string;
+  costPerMu: string;
+  unitOutputCost: string;
+  gradingRate: string;
+  referenceValue: string;
+}
+
 export interface CropCycleListQuery {
   farmId: number;
   page: number;

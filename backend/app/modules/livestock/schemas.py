@@ -9,6 +9,7 @@ LivestockBatchStatus = Literal["all", "ACTIVE", "CLOSED"]
 LivestockMovementType = Literal["TRANSFER", "DEATH", "CULL", "EXIT"]
 LivestockHealthType = Literal["VACCINATION", "MEDICATION", "DISEASE", "OTHER"]
 LivestockCostType = Literal["ENTRY", "LABOR", "OVERHEAD", "OTHER"]
+SupportedLivestockSpecies = Literal["PIG", "CHICKEN"]
 
 
 class LivestockBatchListQuery(BaseModel):
@@ -19,6 +20,7 @@ class LivestockBatchListQuery(BaseModel):
     page_size: int = Field(default=20, alias="pageSize", ge=1, le=100)
     keyword: str = Field(default="", max_length=100)
     status: LivestockBatchStatus = "all"
+    species_code: SupportedLivestockSpecies = Field(default="PIG", alias="speciesCode")
 
 
 class LivestockAnalysisQuery(BaseModel):
@@ -26,6 +28,7 @@ class LivestockAnalysisQuery(BaseModel):
 
     farm_id: int = Field(alias="farmId", gt=0)
     trend_days: int = Field(default=30, alias="trendDays", ge=7, le=90)
+    species_code: SupportedLivestockSpecies = Field(default="PIG", alias="speciesCode")
 
 
 class CreateLivestockBatchPayload(BaseModel):

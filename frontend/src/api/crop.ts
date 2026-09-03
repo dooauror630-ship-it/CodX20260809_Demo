@@ -3,6 +3,7 @@ import type {
   AvailableFieldOperationInput,
   CropCycle,
   CropCycleAnalysis,
+  CropAnalysisComparison,
   CropCycleCostSummary,
   CropCycleListData,
   CropCycleListQuery,
@@ -11,6 +12,7 @@ import type {
   FieldOperation,
   FieldOperationInput,
   FieldOperationType,
+  CropOperationSuggestion,
   HarvestBatch,
   GradingRecord,
   GradingRecordData,
@@ -104,6 +106,23 @@ export async function getCropCycleAnalysis(cycleId: number) {
   return (
     await apiClient.get<DataResponse<CropCycleAnalysis>>(
       `/crop-cycles/${cycleId}/analysis`,
+    )
+  ).data.data;
+}
+
+export async function getCropOperationSuggestions(cycleId: number) {
+  return (
+    await apiClient.get<DataResponse<{ items: CropOperationSuggestion[] }>>(
+      `/crop-cycles/${cycleId}/operation-suggestions`,
+    )
+  ).data.data;
+}
+
+export async function getCropFarmAnalysis(farmId: number) {
+  return (
+    await apiClient.get<DataResponse<{ items: CropAnalysisComparison[]; total: number }>>(
+      "/crop-analysis",
+      { params: { farmId } },
     )
   ).data.data;
 }

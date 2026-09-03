@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0018_grading_records"
+REQUIRED_SCHEMA_REVISION = "0019_crop_operation_templates"
 
 
 REQUIRED_SCHEMA = {
@@ -118,6 +118,9 @@ REQUIRED_SCHEMA = {
         "id", "farm_id", "cycle_code", "plot_id", "crop_type_id", "variety_id", "area_mu",
         "planned_start_date", "planned_end_date", "actual_start_date", "actual_end_date", "status",
         "notes", "created_by_id", "updated_by_id", "created_at", "updated_at",
+    },
+    "crop_operation_templates": {
+        "id", "crop_type_id", "operation_type", "offset_days", "required", "default_notes", "created_at",
     },
     "field_operations": {
         "id", "farm_id", "crop_cycle_id", "operation_type", "operation_date", "area_mu",

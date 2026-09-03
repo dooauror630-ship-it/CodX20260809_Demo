@@ -194,12 +194,17 @@ def _cost_entry_payload(entry):
     }
 
 
-def _farm_summary(farm_id):
+def _farm_summary(farm_id, species_id=None):
+    batch_conditions = [
+        LivestockBatch.farm_id == farm_id,
+        LivestockBatch.status == "ACTIVE",
+    ]
+    movement_conditions = [LivestockMovement.farm_id == farm_id]
+    if species_id is not None:
+        batch_conditions.append(LivestockBatch.species_id == species_id)
+        movement_conditions.append(LivestockBatch.species_id == species_id)
     active_batch_count = db.session.scalar(
-        select(func.count(LivestockBatch.id)).where(
-            LivestockBatch.farm_id == farm_id,
-            LivestockBatch.status == "ACTIVE",
-        )
+        select(func.count(LivestockBatch.id)).where(*batch_conditions)
     ) or 0
     row = db.session.execute(
         select(
@@ -219,7 +224,9 @@ def _farm_summary(farm_id):
                 (LivestockMovement.movement_type == "EXIT", LivestockMovement.quantity),
                 else_=0,
             )), 0),
-        ).where(LivestockMovement.farm_id == farm_id)
+        )
+        .join(LivestockBatch, LivestockBatch.id == LivestockMovement.batch_id)
+        .where(*movement_conditions)
     ).one()
     initial_count, death_count, cull_count, exit_count = (int(value) for value in row)
     return {
@@ -232,7 +239,13 @@ def _farm_summary(farm_id):
 
 def list_livestock_batches(query, actor):
     get_accessible_farm(query.farm_id, actor)
-    conditions = [LivestockBatch.farm_id == query.farm_id]
+    species_id = db.session.scalar(
+        select(LivestockSpecies.id).where(LivestockSpecies.code == query.species_code)
+    )
+    conditions = [
+        LivestockBatch.farm_id == query.farm_id,
+        LivestockBatch.species_id == species_id,
+    ]
     if query.keyword:
         conditions.append(or_(
             LivestockBatch.batch_no.contains(query.keyword, autoescape=True),
@@ -260,7 +273,7 @@ def list_livestock_batches(query, actor):
             "total": total,
             "totalPages": ceil(total / query.page_size) if total else 0,
         },
-        "summary": _farm_summary(query.farm_id),
+        "summary": _farm_summary(query.farm_id, species_id),
     }
 
 
@@ -471,17 +484,17 @@ def livestock_batch_detail(batch_id, actor):
 def livestock_analysis(query, actor, today=None):
     get_accessible_farm(query.farm_id, actor)
     today = today or date.today()
-    pig_species_id = db.session.scalar(
-        select(LivestockSpecies.id).where(LivestockSpecies.code == "PIG")
+    species_id = db.session.scalar(
+        select(LivestockSpecies.id).where(LivestockSpecies.code == query.species_code)
     )
     batches = db.session.scalars(
         select(LivestockBatch)
         .where(
             LivestockBatch.farm_id == query.farm_id,
-            LivestockBatch.species_id == pig_species_id,
+            LivestockBatch.species_id == species_id,
         )
         .order_by(LivestockBatch.entry_date.desc(), LivestockBatch.id.desc())
-    ).all() if pig_species_id else []
+    ).all() if species_id else []
     batch_ids = [batch.id for batch in batches]
     movements = db.session.scalars(
         select(LivestockMovement)
@@ -638,14 +651,14 @@ def cancel_livestock_cost_entry(entry_id, actor):
     return _cost_entry_payload(entry)
 
 
-def _pig_species(species_id):
+def _supported_species(species_id):
     species = db.session.get(LivestockSpecies, species_id)
     if species is None:
         raise ApiError("养殖品类不存在", 404, "LIVESTOCK_SPECIES_NOT_FOUND", "speciesId")
     if not species.is_active:
         raise ApiError("养殖品类已停用", 409, "LIVESTOCK_SPECIES_DISABLED", "speciesId")
-    if species.code != "PIG":
-        raise ApiError("当前阶段仅支持生猪批次", 409, "LIVESTOCK_SPECIES_NOT_SUPPORTED", "speciesId")
+    if species.code not in ("PIG", "CHICKEN"):
+        raise ApiError("当前养殖品类尚未支持", 409, "LIVESTOCK_SPECIES_NOT_SUPPORTED", "speciesId")
     return species
 
 
@@ -662,9 +675,10 @@ def _lock_barns(barn_ids, farm_id):
     return by_id
 
 
-def _validate_pig_barn(barn, *, destination=False):
-    if barn.barn_type not in ("pig", "isolation"):
-        raise ApiError("生猪只能进入猪舍或隔离舍", 409, "BARN_TYPE_MISMATCH")
+def _validate_species_barn(barn, species_code, *, destination=False):
+    expected_type = "pig" if species_code == "PIG" else "chicken"
+    if barn.barn_type not in (expected_type, "isolation"):
+        raise ApiError("养殖品类与圈舍类型不匹配", 409, "BARN_TYPE_MISMATCH")
     if destination and not barn.is_active:
         raise ApiError("目标圈舍已停用", 409, "BARN_DISABLED")
 
@@ -733,9 +747,9 @@ def create_livestock_batch(payload, actor):
         return existing, False
     if payload.entry_date > date.today():
         raise ApiError("入栏日期不能晚于今天", 400, "ENTRY_DATE_IN_FUTURE", "entryDate")
-    _pig_species(payload.species_id)
+    species = _supported_species(payload.species_id)
     barn = _lock_barns([payload.barn_id], payload.farm_id)[payload.barn_id]
-    _validate_pig_barn(barn, destination=True)
+    _validate_species_barn(barn, species.code, destination=True)
     _ensure_capacity(barn, payload.initial_count, payload.farm_id)
 
     batch = LivestockBatch(
@@ -768,7 +782,7 @@ def create_livestock_batch(payload, actor):
         existing = _existing_batch(payload, actor)
         if existing is not None:
             return existing, False
-        raise ApiError("生猪批次入栏冲突，请刷新后重试", 409, "LIVESTOCK_ENTRY_CONFLICT") from error
+        raise ApiError("养殖批次入栏冲突，请刷新后重试", 409, "LIVESTOCK_ENTRY_CONFLICT") from error
     return livestock_batch_detail(batch.id, actor), True
 
 
@@ -830,18 +844,19 @@ def create_livestock_movement(payload, actor):
     if payload.to_barn_id is not None:
         barn_ids.append(payload.to_barn_id)
     barns = _lock_barns(barn_ids, payload.farm_id)
+    species = db.session.get(LivestockSpecies, batch.species_id)
     source_barn = barns[payload.from_barn_id]
-    _validate_pig_barn(source_barn)
+    _validate_species_barn(source_barn, species.code)
     if payload.to_barn_id is not None:
         destination_barn = barns[payload.to_barn_id]
-        _validate_pig_barn(destination_barn, destination=True)
+        _validate_species_barn(destination_barn, species.code, destination=True)
         _ensure_capacity(destination_barn, payload.quantity, payload.farm_id)
 
     state = _batch_states([batch.id])[batch.id]
     available = state["positions"].get(payload.from_barn_id, 0)
     if available < payload.quantity:
         raise ApiError(
-            f"来源圈舍存栏不足，可用 {available} 头",
+            f"来源圈舍存栏不足，可用 {available}",
             409,
             "BARN_HEAD_COUNT_INSUFFICIENT",
             "quantity",

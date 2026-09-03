@@ -15,7 +15,15 @@ from ..farm.service import get_accessible_farm
 from ..catalog.models import Unit
 from ..inventory.models import Item, StockDocument, StockMovementLine
 from ..inventory.purchase_service import _require_write_access
-from .models import CropCycle, FieldOperation, FieldOperationInput, GradingRecord, HarvestBatch, TobaccoCuringBatch
+from .models import (
+    CropCycle,
+    CropOperationTemplate,
+    FieldOperation,
+    FieldOperationInput,
+    GradingRecord,
+    HarvestBatch,
+    TobaccoCuringBatch,
+)
 from ..inventory.models import Warehouse
 
 
@@ -278,6 +286,72 @@ def crop_cycle_analysis(cycle_id, actor):
             "unitOutputCost": format(total_cost / total_harvest if total_harvest else 0, ".2f"),
         },
     }
+
+
+def crop_operation_suggestions(cycle_id, actor):
+    cycle = db.session.get(CropCycle, cycle_id)
+    if cycle is None:
+        raise ApiError("种植周期不存在", 404, "CROP_CYCLE_NOT_FOUND")
+    get_accessible_farm(cycle.farm_id, actor)
+    recorded_types = set(db.session.scalars(
+        select(FieldOperation.operation_type).where(FieldOperation.crop_cycle_id == cycle.id)
+    ).all())
+    templates = db.session.scalars(
+        select(CropOperationTemplate)
+        .where(CropOperationTemplate.crop_type_id == cycle.crop_type_id)
+        .order_by(CropOperationTemplate.offset_days, CropOperationTemplate.id)
+    ).all()
+    start_date = cycle.actual_start_date or cycle.planned_start_date
+    today = date.today()
+    return {
+        "items": [
+            {
+                "templateId": template.id,
+                "operationType": template.operation_type,
+                "offsetDays": template.offset_days,
+                "required": template.required,
+                "defaultNotes": template.default_notes,
+                "suggestedDate": (start_date + timedelta(days=template.offset_days)).isoformat(),
+                "recorded": template.operation_type in recorded_types,
+                "overdue": (
+                    template.operation_type not in recorded_types
+                    and start_date + timedelta(days=template.offset_days) < today
+                ),
+            }
+            for template in templates
+        ]
+    }
+
+
+def crop_farm_analysis(query, actor):
+    get_accessible_farm(query.farm_id, actor)
+    rows = db.session.execute(
+        select(CropCycle, Plot)
+        .join(Plot, Plot.id == CropCycle.plot_id)
+        .where(CropCycle.farm_id == query.farm_id, CropCycle.status.in_(("HARVESTING", "CLOSED")))
+        .order_by(CropCycle.planned_start_date.desc(), CropCycle.id.desc())
+        .limit(20)
+    ).all()
+    items = []
+    for cycle, plot in rows:
+        analysis = crop_cycle_analysis(cycle.id, actor)
+        items.append({
+            "cycleId": cycle.id,
+            "cycleCode": cycle.cycle_code,
+            "cropTypeName": analysis["cropTypeName"],
+            "plotName": plot.name,
+            "status": cycle.status,
+            "areaMu": analysis["areaMu"],
+            "unitName": analysis["unitName"],
+            "totalNetWeight": analysis["harvest"]["totalNetWeight"],
+            "yieldPerMu": analysis["harvest"]["yieldPerMu"],
+            "totalCost": analysis["cost"]["totalCost"],
+            "costPerMu": analysis["cost"]["costPerMu"],
+            "unitOutputCost": analysis["cost"]["unitOutputCost"],
+            "gradingRate": analysis["grading"]["gradingRate"],
+            "referenceValue": analysis["grading"]["referenceValue"],
+        })
+    return {"items": items, "total": len(items)}
 
 
 def create_crop_cycle(payload, actor):

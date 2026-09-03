@@ -179,6 +179,7 @@ export interface LivestockBatchListQuery {
   pageSize: number;
   keyword?: string;
   status?: "all" | LivestockBatchStatus;
+  speciesCode?: "PIG" | "CHICKEN";
 }
 
 export interface LivestockAnalysisSummary {
@@ -230,6 +231,7 @@ export interface LivestockAnalysis {
 export interface LivestockAnalysisQuery {
   farmId: number;
   trendDays?: number;
+  speciesCode?: "PIG" | "CHICKEN";
 }
 
 export interface CreateLivestockBatchInput {

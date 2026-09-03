@@ -5,6 +5,7 @@ from ...core.security import login_required
 from ..auth.schemas import parse_payload
 from .schemas import (
     CropCycleListQuery,
+    CropFarmAnalysisQuery,
     CreateCropCyclePayload,
     CreateFieldOperationPayload,
     CreateFieldOperationInputPayload,
@@ -21,6 +22,8 @@ from .service import (
     create_field_operation_input,
     get_crop_cycle,
     crop_cycle_analysis,
+    crop_farm_analysis,
+    crop_operation_suggestions,
     crop_cycle_cost_summary,
     list_crop_cycles,
     list_field_operations,
@@ -59,6 +62,19 @@ def crop_cycle_cost(cycle_id):
 @login_required
 def crop_cycle_analysis_overview(cycle_id):
     return success_response(crop_cycle_analysis(cycle_id, g.current_user))
+
+
+@crop_bp.get("/crop-cycles/<int:cycle_id>/operation-suggestions")
+@login_required
+def crop_cycle_operation_suggestions(cycle_id):
+    return success_response(crop_operation_suggestions(cycle_id, g.current_user))
+
+
+@crop_bp.get("/crop-analysis")
+@login_required
+def crop_analysis_overview():
+    query = parse_payload(CropFarmAnalysisQuery, request.args.to_dict(), "种植分析筛选条件格式错误")
+    return success_response(crop_farm_analysis(query, g.current_user))
 
 
 @crop_bp.post("/crop-cycles")

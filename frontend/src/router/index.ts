@@ -86,6 +86,13 @@ export const router = createRouter({
           meta: { title: "生猪管理" },
         },
         {
+          path: "livestock/chickens",
+          name: "chicken-livestock",
+          component: () => import("@/modules/livestock/PigManagementView.vue"),
+          props: { speciesCode: "CHICKEN" },
+          meta: { title: "肉鸡管理" },
+        },
+        {
           path: "crop/cycles",
           name: "crop-cycles",
           component: () => import("@/modules/crop/CropCycleView.vue"),

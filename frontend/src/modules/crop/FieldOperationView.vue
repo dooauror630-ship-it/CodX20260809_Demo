@@ -10,6 +10,7 @@ import {
   getAvailableFieldOperationInputs,
   getCropCycleCostSummary,
   getCropCycles,
+  getCropOperationSuggestions,
   getFieldOperationInputs,
   getFieldOperations,
 } from "@/api/crop";
@@ -19,6 +20,7 @@ import type {
   AvailableFieldOperationInput,
   CropCycle,
   CropCycleCostSummary,
+  CropOperationSuggestion,
   FieldOperation,
   FieldOperationInput,
   FieldOperationType,
@@ -35,6 +37,7 @@ const bindingDocumentId = ref<number | null>(null);
 const cycles = ref<CropCycle[]>([]);
 const operations = ref<FieldOperation[]>([]);
 const costSummary = ref<CropCycleCostSummary | null>(null);
+const suggestions = ref<CropOperationSuggestion[]>([]);
 const operationInputs = ref<FieldOperationInput[]>([]);
 const availableInputs = ref<AvailableFieldOperationInput[]>([]);
 const inputOperation = ref<FieldOperation | null>(null);
@@ -106,13 +109,14 @@ async function loadOperations() {
   const farmId = farmStore.currentFarmId;
   if (!farmId || !selectedCycleId.value) {
     operations.value = [];
+    suggestions.value = [];
     costSummary.value = null;
     pagination.total = 0;
     return;
   }
   loading.value = true;
   try {
-    const [data, summary] = await Promise.all([
+    const [data, summary, suggestionData] = await Promise.all([
       getFieldOperations({
         farmId,
         cropCycleId: selectedCycleId.value,
@@ -120,10 +124,12 @@ async function loadOperations() {
         pageSize: pagination.pageSize,
       }),
       getCropCycleCostSummary(selectedCycleId.value),
+      getCropOperationSuggestions(selectedCycleId.value),
     ]);
     operations.value = data.items;
     pagination.total = data.pagination.total;
     costSummary.value = summary;
+    suggestions.value = suggestionData.items;
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
@@ -140,10 +146,10 @@ async function loadReferences() {
   }
 }
 
-function openCreate() {
+function openCreate(suggestion?: CropOperationSuggestion) {
   Object.assign(form, {
-    operationType: "LAND_PREPARATION",
-    operationDate: new Date().toISOString().slice(0, 10),
+    operationType: suggestion?.operationType ?? "LAND_PREPARATION",
+    operationDate: suggestion?.suggestedDate ?? new Date().toISOString().slice(0, 10),
     areaMu: selectedCycle.value
       ? Number(selectedCycle.value.areaMu)
       : undefined,
@@ -151,7 +157,7 @@ function openCreate() {
     machineHours: 0,
     laborCost: 0,
     serviceCost: 0,
-    notes: "",
+    notes: suggestion?.defaultNotes ?? "",
   });
   dialogVisible.value = true;
 }
@@ -269,7 +275,7 @@ watch(selectedCycleId, () => {
         v-if="writable && selectedCycle"
         type="primary"
         :icon="Plus"
-        @click="openCreate"
+        @click="openCreate()"
         >登记操作</el-button
       >
     </header>
@@ -320,6 +326,40 @@ watch(selectedCycleId, () => {
           >¥ {{ costSummary.curingCost }}</el-descriptions-item
         >
       </el-descriptions>
+      <div v-if="selectedCycle" class="farm-table-shell suggestion-table">
+        <div class="section-heading">
+          <h2>周期作业建议</h2>
+          <span>以实际开始日期优先计算</span>
+        </div>
+        <el-table :data="suggestions" row-key="templateId" empty-text="该作物暂无作业模板">
+          <el-table-column label="作业" min-width="130">
+            <template #default="scope">{{ typeLabel(scope.row.operationType) }}</template>
+          </el-table-column>
+          <el-table-column prop="suggestedDate" label="建议日期" min-width="130" />
+          <el-table-column label="要求" width="90">
+            <template #default="scope">
+              <el-tag :type="scope.row.required ? 'danger' : 'info'" effect="plain">
+                {{ scope.row.required ? "必做" : "建议" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="scope">
+              <el-tag :type="scope.row.recorded ? 'success' : scope.row.overdue ? 'danger' : 'warning'">
+                {{ scope.row.recorded ? "已记录" : scope.row.overdue ? "逾期" : "待处理" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="defaultNotes" label="建议内容" min-width="220" />
+          <el-table-column v-if="writable" label="操作" width="90" fixed="right">
+            <template #default="scope">
+              <el-button link type="primary" :disabled="scope.row.recorded" @click="openCreate(scope.row)">
+                登记
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
       <div v-if="selectedCycle" class="farm-table-shell">
         <el-table
           v-loading="loading"
@@ -548,3 +588,10 @@ watch(selectedCycleId, () => {
     >
   </section>
 </template>
+
+<style scoped>
+.suggestion-table { margin-top: 20px; }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; padding: 18px 20px 0; }
+.section-heading h2 { margin: 0 0 12px; font-size: 16px; }
+.section-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
+</style>

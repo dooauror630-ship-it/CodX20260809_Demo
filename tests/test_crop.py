@@ -70,6 +70,13 @@ class CropCycleTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         return response.get_json()["data"]["variety"]
 
+    def create_crop_variety(self, crop_type, code):
+        response = self.post(self.admin, "/crop-varieties", {
+            "cropTypeId": crop_type["id"], "code": code, "name": code,
+        })
+        self.assertEqual(response.status_code, 201)
+        return response.get_json()["data"]["variety"]
+
     def cycle_payload(self, code="CYCLE-01", area="40", start=None, end=None):
         start = start or date.today().isoformat()
         end = end or (date.today() + timedelta(days=90)).isoformat()
@@ -382,6 +389,85 @@ class CropCycleTestCase(unittest.TestCase):
         closed = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "CLOSED"})
         self.assertEqual(closed.status_code, 200)
         self.assertEqual(closed.get_json()["data"]["cycle"]["status"], "CLOSED")
+
+    def test_crop_operation_suggestions_cover_supported_crops(self):
+        catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
+        crop_types = {item["code"]: item for item in catalogs["cropTypes"]}
+        start = date.today() - timedelta(days=50)
+        expected_types = {
+            "GARLIC": {"LAND_PREPARATION", "SOWING", "WEEDING", "FERTILIZATION", "IRRIGATION", "PEST_CONTROL"},
+            "RICE": {"LAND_PREPARATION", "SOWING", "TRANSPLANTING", "IRRIGATION", "FERTILIZATION", "PEST_CONTROL"},
+            "RAPESEED": {"LAND_PREPARATION", "SOWING", "WEEDING", "FERTILIZATION", "PEST_CONTROL"},
+        }
+        cycles = {}
+        for index, (code, operation_types) in enumerate(expected_types.items(), start=1):
+            crop_type = crop_types[code]
+            variety = self.create_crop_variety(crop_type, f"{code}-V1")
+            payload = self.cycle_payload(
+                code=f"{code}-01",
+                area="20",
+                start=start.isoformat(),
+                end=(date.today() + timedelta(days=100)).isoformat(),
+            )
+            payload.update({"cropTypeId": crop_type["id"], "varietyId": variety["id"]})
+            cycle = self.post(self.admin, "/crop-cycles", payload).get_json()["data"]["cycle"]
+            self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {
+                "status": "ACTIVE", "actualStartDate": start.isoformat(),
+            })
+            response = self.viewer.get(f"/api/v1/crop-cycles/{cycle['id']}/operation-suggestions")
+            self.assertEqual(response.status_code, 200)
+            suggestions = response.get_json()["data"]["items"]
+            self.assertEqual({item["operationType"] for item in suggestions}, operation_types)
+            self.assertEqual(suggestions[0]["suggestedDate"], start.isoformat())
+            self.assertTrue(any(item["overdue"] for item in suggestions))
+            cycles[code] = cycle
+
+        garlic = cycles["GARLIC"]
+        self.post(self.admin, "/field-operations", {
+            "farmId": self.farm["id"], "cropCycleId": garlic["id"], "operationType": "LAND_PREPARATION",
+            "operationDate": date.today().isoformat(), "areaMu": "20",
+        })
+        suggestions = self.viewer.get(
+            f"/api/v1/crop-cycles/{garlic['id']}/operation-suggestions"
+        ).get_json()["data"]["items"]
+        land_preparation = next(item for item in suggestions if item["operationType"] == "LAND_PREPARATION")
+        self.assertTrue(land_preparation["recorded"])
+        self.assertFalse(land_preparation["overdue"])
+
+        tobacco = self.post(self.admin, "/crop-cycles", self.cycle_payload(
+            code="TOBACCO-SUGGESTIONS", area="20", start=(date.today() + timedelta(days=101)).isoformat(),
+            end=(date.today() + timedelta(days=190)).isoformat(),
+        )).get_json()["data"]["cycle"]
+        response = self.viewer.get(f"/api/v1/crop-cycles/{tobacco['id']}/operation-suggestions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["items"], [])
+
+    def test_crop_farm_analysis_compares_cycles_without_combining_units(self):
+        cycles = []
+        for index, unit in enumerate((self.kg_unit, self.other_unit), start=1):
+            cycle = self.post(self.admin, "/crop-cycles", self.cycle_payload(
+                code=f"COMPARE-{index}", area="40",
+            )).get_json()["data"]["cycle"]
+            self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "ACTIVE"})
+            self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+            self.post(self.admin, "/harvest-batches", {
+                "farmId": self.farm["id"], "cropCycleId": cycle["id"], "harvestNo": f"COMPARE-H-{index}",
+                "harvestDate": date.today().isoformat(), "grossWeight": "110", "netWeight": "100",
+                "unitId": unit["id"], "warehouseId": self.warehouse["id"],
+            })
+            cycles.append((cycle, unit))
+
+        response = self.viewer.get("/api/v1/crop-analysis", query_string={"farmId": self.farm["id"]})
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["data"]["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual({item["cycleId"] for item in items}, {cycle["id"] for cycle, _unit in cycles})
+        self.assertEqual({item["unitName"] for item in items}, {unit["name"] for _cycle, unit in cycles})
+        self.assertTrue(all(item["totalNetWeight"] == "100.00" for item in items))
+
+        other_farm = self.create_farm("CROP-ANALYSIS-OTHER")
+        denied = self.viewer.get("/api/v1/crop-analysis", query_string={"farmId": other_farm["id"]})
+        self.assertEqual(denied.status_code, 403)
 
 
 if __name__ == "__main__":

@@ -128,6 +128,10 @@ onMounted(() => void loadFarmContext());
           <el-icon><Food /></el-icon>
           <span>生猪管理</span>
         </router-link>
+        <router-link to="/livestock/chickens" class="sidebar-link">
+          <el-icon><Food /></el-icon>
+          <span>肉鸡管理</span>
+        </router-link>
         <router-link to="/crop/cycles" class="sidebar-link">
           <el-icon><MapLocation /></el-icon>
           <span>种植周期</span>

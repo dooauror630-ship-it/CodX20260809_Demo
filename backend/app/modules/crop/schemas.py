@@ -22,6 +22,12 @@ class CropCycleListQuery(BaseModel):
     status: Literal["all", "PLANNED", "ACTIVE", "HARVESTING", "CLOSED", "CANCELLED"] = "all"
 
 
+class CropFarmAnalysisQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    farm_id: int = Field(alias="farmId", gt=0)
+
+
 class CreateCropCyclePayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
 
