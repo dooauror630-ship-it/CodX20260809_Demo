@@ -123,6 +123,12 @@ export const router = createRouter({
           meta: { title: "种植分析" },
         },
         {
+          path: "trade/overview",
+          name: "trade-overview",
+          component: () => import("@/modules/trade/TradeView.vue"),
+          meta: { title: "销售经营" },
+        },
+        {
           path: "admin/users",
           name: "admin-users",
           component: () => import("@/modules/admin/UserManagementView.vue"),

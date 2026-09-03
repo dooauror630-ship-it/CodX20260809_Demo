@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0019_crop_operation_templates"
+REQUIRED_SCHEMA_REVISION = "0020_trade_sales"
 
 
 REQUIRED_SCHEMA = {
@@ -143,6 +143,10 @@ REQUIRED_SCHEMA = {
         "id", "farm_id", "field_operation_id", "stock_document_id", "item_id", "quantity", "amount",
         "created_by_id", "created_at",
     },
+    "customers": {"id", "farm_id", "code", "name", "contact", "phone", "address", "is_active", "created_by_id", "updated_by_id", "created_at", "updated_at"},
+    "sales_orders": {"id", "farm_id", "order_no", "customer_id", "warehouse_id", "sale_date", "status", "total_amount", "received_amount", "notes", "posted_at", "posted_by_id", "created_by_id", "created_at"},
+    "sales_order_lines": {"id", "sales_order_id", "item_id", "quantity", "unit_price", "amount", "unit_cost"},
+    "payments": {"id", "farm_id", "payment_no", "direction", "business_date", "amount", "method", "customer_id", "sales_order_id", "notes", "created_by_id", "created_at"},
 }
 
 
@@ -179,6 +183,7 @@ def create_app(test_config=None):
     from .modules.farm import models as _farm_models  # noqa: F401
     from .modules.inventory import models as _inventory_models  # noqa: F401
     from .modules.livestock import models as _livestock_models  # noqa: F401
+    from .modules.trade import models as _trade_models  # noqa: F401
 
     migrate.init_app(app, db, directory=str(Path(BACKEND_DIR) / "migrations"))
     register_error_handlers(app)
@@ -193,6 +198,7 @@ def create_app(test_config=None):
     from .modules.farm import farm_bp
     from .modules.inventory import inventory_bp
     from .modules.livestock import livestock_bp
+    from .modules.trade import trade_bp
     from .modules.system import system_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
@@ -205,6 +211,7 @@ def create_app(test_config=None):
     app.register_blueprint(crop_bp, url_prefix="/api/v1")
     app.register_blueprint(inventory_bp, url_prefix="/api/v1")
     app.register_blueprint(livestock_bp, url_prefix="/api/v1")
+    app.register_blueprint(trade_bp, url_prefix="/api/v1")
     app.register_blueprint(system_bp)
 
     with app.app_context():
