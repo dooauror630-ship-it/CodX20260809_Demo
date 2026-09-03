@@ -100,8 +100,8 @@ def _validate_sales_refs(payload, actor):
     return customer, warehouse, items
 
 
-def sales_payload(order, customer):
-    return {
+def sales_payload(order, customer, lines=None):
+    payload = {
         "id": order.id,
         "farmId": order.farm_id,
         "orderNo": order.order_no,
@@ -115,6 +115,9 @@ def sales_payload(order, customer):
         "notes": order.notes,
         "postedAt": format_datetime(order.posted_at),
     }
+    if lines is not None:
+        payload["lines"] = [{"id": line.id, "itemId": line.item_id, "quantity": str(line.quantity), "unitPrice": f"{line.unit_price:.4f}", "amount": f"{line.amount:.2f}", "unitCost": f"{line.unit_cost:.4f}"} for line in lines]
+    return payload
 
 
 def create_sales_order(payload, actor):
@@ -266,6 +269,11 @@ def trade_summary(farm_id, actor):
         )
         or 0
     )
+    cost = db.session.scalar(
+        select(func.coalesce(func.sum(SalesOrderLine.quantity * SalesOrderLine.unit_cost), 0))
+        .join(SalesOrder, SalesOrder.id == SalesOrderLine.sales_order_id)
+        .where(SalesOrder.farm_id == farm_id, SalesOrder.status == "POSTED")
+    ) or 0
     received = (
         db.session.scalar(
             select(func.coalesce(func.sum(Payment.amount), 0)).where(
@@ -276,6 +284,9 @@ def trade_summary(farm_id, actor):
     )
     return {
         "postedSalesAmount": f"{Decimal(revenue):.2f}",
+        "salesCost": f"{Decimal(cost):.2f}",
+        "grossProfit": f"{Decimal(revenue) - Decimal(cost):.2f}",
         "receivedAmount": f"{Decimal(received):.2f}",
+        "cashNetInflow": f"{Decimal(received):.2f}",
         "receivableAmount": f"{Decimal(revenue) - Decimal(received):.2f}",
     }
