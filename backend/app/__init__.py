@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0011_livestock_production"
+REQUIRED_SCHEMA_REVISION = "0017_tobacco_curing_batches"
 
 
 REQUIRED_SCHEMA = {
@@ -109,6 +109,33 @@ REQUIRED_SCHEMA = {
         "id", "farm_id", "batch_id", "record_no", "occurred_on", "sample_count",
         "average_weight", "notes", "created_by_id", "created_at",
     },
+    "cost_entries": {
+        "id", "farm_id", "livestock_batch_id", "entry_no", "business_date", "cost_type",
+        "amount", "description", "notes", "status", "cancelled_at", "cancelled_by_id",
+        "created_by_id", "created_at",
+    },
+    "crop_cycles": {
+        "id", "farm_id", "cycle_code", "plot_id", "crop_type_id", "variety_id", "area_mu",
+        "planned_start_date", "planned_end_date", "actual_start_date", "actual_end_date", "status",
+        "notes", "created_by_id", "updated_by_id", "created_at", "updated_at",
+    },
+    "field_operations": {
+        "id", "farm_id", "crop_cycle_id", "operation_type", "operation_date", "area_mu",
+        "labor_hours", "machine_hours", "labor_cost", "service_cost", "notes", "created_by_id", "created_at",
+    },
+    "harvest_batches": {
+        "id", "farm_id", "crop_cycle_id", "harvest_no", "harvest_date", "gross_weight", "net_weight",
+        "unit_id", "warehouse_id", "notes", "created_by_id", "created_at",
+    },
+    "tobacco_curing_batches": {
+        "id", "farm_id", "crop_cycle_id", "curing_no", "start_at", "end_at", "input_weight",
+        "output_weight", "unit_id", "fuel_cost", "electricity_cost", "status", "notes",
+        "created_by_id", "completed_by_id", "created_at",
+    },
+    "field_operation_inputs": {
+        "id", "farm_id", "field_operation_id", "stock_document_id", "item_id", "quantity", "amount",
+        "created_by_id", "created_at",
+    },
 }
 
 
@@ -141,6 +168,7 @@ def create_app(test_config=None):
 
     from .modules.auth import models as _auth_models  # noqa: F401
     from .modules.catalog import models as _catalog_models  # noqa: F401
+    from .modules.crop import models as _crop_models  # noqa: F401
     from .modules.farm import models as _farm_models  # noqa: F401
     from .modules.inventory import models as _inventory_models  # noqa: F401
     from .modules.livestock import models as _livestock_models  # noqa: F401
@@ -150,9 +178,11 @@ def create_app(test_config=None):
     init_security(app)
 
     from .modules.admin import admin_bp
+    from .modules.agent import agent_bp
     from .modules.analytics import analytics_bp
     from .modules.auth import auth_bp
     from .modules.catalog import catalog_bp
+    from .modules.crop import crop_bp
     from .modules.farm import farm_bp
     from .modules.inventory import inventory_bp
     from .modules.livestock import livestock_bp
@@ -161,9 +191,11 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
     app.register_blueprint(auth_bp, url_prefix="/api/auth", name_prefix="legacy")
     app.register_blueprint(admin_bp, url_prefix="/api/v1/admin")
+    app.register_blueprint(agent_bp, url_prefix="/api/v1/agent")
     app.register_blueprint(analytics_bp, url_prefix="/api/v1/analytics")
     app.register_blueprint(farm_bp, url_prefix="/api/v1")
     app.register_blueprint(catalog_bp, url_prefix="/api/v1")
+    app.register_blueprint(crop_bp, url_prefix="/api/v1")
     app.register_blueprint(inventory_bp, url_prefix="/api/v1")
     app.register_blueprint(livestock_bp, url_prefix="/api/v1")
     app.register_blueprint(system_bp)
@@ -204,6 +236,13 @@ def create_app(test_config=None):
         if discrepancies:
             raise click.ClickException(f"Inventory reconciliation failed: {len(discrepancies)} discrepancy(s).")
         click.echo("Inventory balances match posted stock movements.")
+
+    @app.cli.command("seed-agent-demo")
+    def seed_agent_demo_command():
+        from .modules.agent.seed import seed_agent_demo
+
+        farm = seed_agent_demo()
+        click.echo(f"Agent demo data is ready: farmId={farm.id}, code={farm.code}")
 
     return app
 

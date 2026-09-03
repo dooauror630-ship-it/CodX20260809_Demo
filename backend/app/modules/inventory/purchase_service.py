@@ -896,6 +896,26 @@ def _production_cost_object(farm, cost_object_type, cost_object_id, operation_da
             raise ApiError("领退料日期不能晚于批次结束日期", 409, "PRODUCTION_DATE_AFTER_BATCH", "operationDate")
         return "LIVESTOCK_BATCH", batch.id
 
+    if cost_object_type == "crop_cycle":
+        from ..crop.models import CropCycle
+
+        cycle = db.session.get(CropCycle, cost_object_id)
+        if cycle is None:
+            raise ApiError("种植周期不存在", 404, "COST_OBJECT_NOT_FOUND", "costObjectId")
+        if cycle.farm_id != farm.id:
+            raise ApiError("种植周期不属于当前农场", 409, "COST_OBJECT_FARM_MISMATCH", "costObjectId")
+        if cycle.status in ("CLOSED", "CANCELLED"):
+            raise ApiError("种植周期已结束，不能办理领退料", 409, "CROP_CYCLE_CLOSED")
+        if operation_type == "issue" and cycle.status not in ("ACTIVE", "HARVESTING"):
+            raise ApiError("种植周期尚未开始，不能继续领料", 409, "CROP_CYCLE_NOT_ACTIVE")
+        lower_bound = cycle.actual_start_date or cycle.planned_start_date
+        upper_bound = cycle.actual_end_date or cycle.planned_end_date
+        if operation_date and operation_date < lower_bound:
+            raise ApiError("领退料日期不能早于种植周期开始日期", 409, "PRODUCTION_DATE_BEFORE_CROP_CYCLE", "operationDate")
+        if operation_date and operation_date > upper_bound:
+            raise ApiError("领退料日期不能晚于种植周期结束日期", 409, "PRODUCTION_DATE_AFTER_CROP_CYCLE", "operationDate")
+        return "CROP_CYCLE", cycle.id
+
     model, label = (Barn, "圈舍") if cost_object_type == "barn" else (Plot, "地块")
     cost_object = db.session.get(model, cost_object_id)
     if cost_object is None:
@@ -932,7 +952,10 @@ def _production_operation_payload(document):
         "itemId": item.id,
         "itemCode": item.code,
         "itemName": item.name,
+        "itemType": item.item_type,
         "unitName": unit.name,
+        "unitDimension": unit.dimension,
+        "unitBaseFactor": _number_text(unit.base_factor),
         "quantity": _number_text(quantity),
         "unitCost": _number_text(movement.unit_cost),
         "amount": _money_text(amount),

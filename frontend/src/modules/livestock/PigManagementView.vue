@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CircleClose, EditPen, Finished, Plus, Refresh, Search, Tickets, View } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -9,10 +9,13 @@ import { errorMessage } from "@/api/client";
 import { getBarns } from "@/api/farms";
 import { getItems, getWarehouses } from "@/api/inventory";
 import {
+  cancelLivestockCostEntry,
   createLivestockBatch,
+  createLivestockCostEntry,
   createLivestockHealthRecord,
   createLivestockMovement,
   createLivestockWeightRecord,
+  getLivestockAnalysis,
   getLivestockBatch,
   getLivestockBatches,
 } from "@/api/livestock";
@@ -23,14 +26,19 @@ import type { LivestockSpecies } from "@/types/catalog";
 import type { Barn } from "@/types/farm";
 import type { Item, Warehouse } from "@/types/inventory";
 import type {
+  LivestockAnalysis,
   LivestockBatch,
   LivestockBatchStatus,
+  LivestockCostEntry,
+  LivestockCostType,
   LivestockHealthType,
   LivestockMovement,
   LivestockSummary,
   WritableLivestockMovementType,
 } from "@/types/livestock";
 import { localDateInputValue } from "@/utils/date";
+import LivestockFarmTrendChart from "./components/LivestockFarmTrendChart.vue";
+import LivestockProductionTrendChart from "./components/LivestockProductionTrendChart.vue";
 
 
 const router = useRouter();
@@ -42,7 +50,7 @@ const referencesLoading = ref(false);
 const batches = ref<LivestockBatch[]>([]);
 const barns = ref<Barn[]>([]);
 const warehouses = ref<Warehouse[]>([]);
-const feedItems = ref<Item[]>([]);
+const productionItems = ref<Item[]>([]);
 const pigSpecies = ref<LivestockSpecies | null>(null);
 const filters = reactive({
   keyword: "",
@@ -55,6 +63,9 @@ const summary = reactive<LivestockSummary>({
   deathCount: 0,
   exitedCount: 0,
 });
+const analysisLoading = ref(false);
+const analysis = ref<LivestockAnalysis | null>(null);
+const analysisFilters = reactive({ trendDays: 30 });
 
 const entryDialogVisible = ref(false);
 const entrySaving = ref(false);
@@ -88,7 +99,7 @@ const detailLoading = ref(false);
 const detailBatch = ref<LivestockBatch | null>(null);
 const productionDialogVisible = ref(false);
 const productionSaving = ref(false);
-const productionType = ref<"feeding" | "health" | "weight">("feeding");
+const productionType = ref<"feeding" | "health" | "weight" | "cost">("feeding");
 const productionForm = reactive({
   recordNo: "",
   occurredOn: "",
@@ -102,6 +113,8 @@ const productionForm = reactive({
   dosage: "",
   sampleCount: 10,
   averageWeight: 1,
+  costType: "ENTRY" as LivestockCostType,
+  amount: 0.01,
   notes: "",
 });
 
@@ -125,6 +138,18 @@ const healthTypeNames: Record<LivestockHealthType, string> = {
   MEDICATION: "用药",
   DISEASE: "病情",
   OTHER: "其他",
+};
+const costCategoryNames: Record<string, string> = {
+  feed: "饲料",
+  veterinary_drug: "兽药",
+  supply: "生产物资",
+  other: "其他物料",
+};
+const costTypeNames: Record<LivestockCostType, string> = {
+  ENTRY: "入栏成本",
+  LABOR: "人工成本",
+  OVERHEAD: "公共费用分摊",
+  OTHER: "其他成本",
 };
 
 function suggestedNo(prefix: string) {
@@ -150,6 +175,10 @@ function movementTag(type: LivestockMovement["movementType"]) {
   if (type === "TRANSFER") return "primary";
   if (type === "DEATH") return "danger";
   return "warning";
+}
+
+function costCategoryName(value: string) {
+  return costCategoryNames[value] ?? "其他物料";
 }
 
 function barnBalanceText(batch: LivestockBatch) {
@@ -188,7 +217,9 @@ async function loadReferences() {
     pigSpecies.value = catalogs.livestockSpecies.find((item) => item.code === "PIG" && item.isActive) ?? null;
     barns.value = barnData.items;
     warehouses.value = warehouseData.items;
-    feedItems.value = itemData.items.filter((item) => item.itemType === "feed");
+    productionItems.value = itemData.items.filter((item) =>
+      ["feed", "veterinary_drug", "supply", "other"].includes(item.itemType),
+    );
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
@@ -220,6 +251,22 @@ async function loadBatches() {
     ElMessage.error(errorMessage(error));
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadAnalysis() {
+  const farmId = farmContext.currentFarmId;
+  if (!farmId) {
+    analysis.value = null;
+    return;
+  }
+  analysisLoading.value = true;
+  try {
+    analysis.value = await getLivestockAnalysis({ farmId, trendDays: analysisFilters.trendDays });
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    analysisLoading.value = false;
   }
 }
 
@@ -295,7 +342,7 @@ async function saveEntry() {
     });
     ElMessage.success("生猪批次已入栏");
     entryDialogVisible.value = false;
-    await loadBatches();
+    await Promise.all([loadBatches(), loadAnalysis()]);
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
@@ -367,7 +414,7 @@ async function saveMovement() {
     });
     ElMessage.success("存栏变动已登记");
     movementDialogVisible.value = false;
-    await loadBatches();
+    await Promise.all([loadBatches(), loadAnalysis()]);
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
@@ -375,7 +422,7 @@ async function saveMovement() {
   }
 }
 
-async function openDetail(batch: LivestockBatch) {
+async function openDetail(batch: Pick<LivestockBatch, "id">) {
   detailDialogVisible.value = true;
   detailLoading.value = true;
   detailBatch.value = null;
@@ -389,12 +436,13 @@ async function openDetail(batch: LivestockBatch) {
   }
 }
 
-function openProduction(type: "feeding" | "health" | "weight") {
+function openProduction(type: "feeding" | "health" | "weight" | "cost") {
   productionType.value = type;
-  productionForm.recordNo = suggestedNo(type === "feeding" ? "FD" : type === "health" ? "HL" : "WT");
-  productionForm.occurredOn = localDateInputValue();
+  const prefix = { feeding: "FD", health: "HL", weight: "WT", cost: "CT" }[type];
+  productionForm.recordNo = suggestedNo(prefix);
+  productionForm.occurredOn = detailBatch.value?.closedAt?.slice(0, 10) ?? localDateInputValue();
   productionForm.warehouseId = warehouses.value[0]?.id ?? null;
-  productionForm.itemId = feedItems.value[0]?.id ?? null;
+  productionForm.itemId = productionItems.value[0]?.id ?? null;
   productionForm.quantity = 1;
   productionForm.lotNo = "";
   productionForm.healthType = "VACCINATION";
@@ -403,6 +451,8 @@ function openProduction(type: "feeding" | "health" | "weight") {
   productionForm.dosage = "";
   productionForm.sampleCount = 10;
   productionForm.averageWeight = 1;
+  productionForm.costType = "ENTRY";
+  productionForm.amount = 0.01;
   productionForm.notes = "";
   productionDialogVisible.value = true;
 }
@@ -414,14 +464,15 @@ async function saveProductionRecord() {
   if (!/^[A-Za-z0-9_-]{3,40}$/.test(productionForm.recordNo.trim())) {
     return ElMessage.error("记录单号须为 3-40 位字母、数字、下划线或短横线");
   }
-  if (!productionForm.occurredOn || productionForm.occurredOn < batch.entryDate || productionForm.occurredOn > localDateInputValue()) {
-    return ElMessage.error("记录日期须在入栏日期至今天之间");
+  const lastBusinessDate = batch.closedAt?.slice(0, 10) ?? localDateInputValue();
+  if (!productionForm.occurredOn || productionForm.occurredOn < batch.entryDate || productionForm.occurredOn > lastBusinessDate) {
+    return ElMessage.error(`记录日期须在入栏日期至${batch.closedAt ? "批次结束日期" : "今天"}之间`);
   }
   productionSaving.value = true;
   try {
     if (productionType.value === "feeding") {
       if (!productionForm.warehouseId || !productionForm.itemId || productionForm.quantity <= 0) {
-        return ElMessage.error("请选择仓库和饲料，并填写正确数量");
+        return ElMessage.error("请选择仓库和领用物料，并填写正确数量");
       }
       await createProductionStockOperation({
         farmId,
@@ -448,7 +499,7 @@ async function saveProductionRecord() {
         dosage: productionForm.dosage.trim() || null,
         notes: productionForm.notes.trim() || null,
       });
-    } else {
+    } else if (productionType.value === "weight") {
       if (!Number.isInteger(productionForm.sampleCount) || productionForm.sampleCount <= 0 || productionForm.averageWeight <= 0) {
         return ElMessage.error("抽样头数和平均体重必须大于零");
       }
@@ -461,14 +512,47 @@ async function saveProductionRecord() {
         averageWeight: productionForm.averageWeight,
         notes: productionForm.notes.trim() || null,
       });
+    } else {
+      if (productionForm.description.trim().length < 2 || productionForm.amount <= 0) {
+        return ElMessage.error("请填写成本说明和大于零的金额");
+      }
+      await createLivestockCostEntry({
+        farmId,
+        batchId: batch.id,
+        entryNo: productionForm.recordNo.trim(),
+        businessDate: productionForm.occurredOn,
+        costType: productionForm.costType,
+        amount: productionForm.amount,
+        description: productionForm.description.trim(),
+        notes: productionForm.notes.trim() || null,
+      });
     }
-    ElMessage.success("生产记录已登记");
+    ElMessage.success(productionType.value === "cost" ? "批次成本已登记" : "生产记录已登记");
     productionDialogVisible.value = false;
     detailBatch.value = await getLivestockBatch(batch.id);
+    await loadAnalysis();
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
     productionSaving.value = false;
+  }
+}
+
+async function cancelCostEntry(entry: LivestockCostEntry) {
+  const batch = detailBatch.value;
+  if (!batch) return;
+  try {
+    await ElMessageBox.confirm(`撤销成本记录“${entry.description}”（¥ ${entry.amount}）？`, "撤销批次成本", {
+      confirmButtonText: "确认撤销",
+      cancelButtonText: "取消",
+      type: "warning",
+    });
+    await cancelLivestockCostEntry(entry.id);
+    ElMessage.success("批次成本已撤销");
+    detailBatch.value = await getLivestockBatch(batch.id);
+    await loadAnalysis();
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(errorMessage(error));
   }
 }
 
@@ -482,7 +566,7 @@ watch(
     movementDialogVisible.value = false;
     detailDialogVisible.value = false;
     productionDialogVisible.value = false;
-    await Promise.all([loadReferences(), loadBatches()]);
+    await Promise.all([loadReferences(), loadBatches(), loadAnalysis()]);
   },
   { immediate: true },
 );
@@ -532,13 +616,57 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
         </article>
         <article class="summary-card">
           <span class="summary-icon tone-red"><CircleClose /></span>
-          <div><p>累计死亡</p><strong>{{ summary.deathCount }}<small>头</small></strong></div>
+          <div><p>累计死亡率</p><strong>{{ analysis?.summary.mortalityRate ?? "0.00" }}<small>% · {{ summary.deathCount }} 头</small></strong></div>
         </article>
         <article class="summary-card">
           <span class="summary-icon tone-amber"><Finished /></span>
           <div><p>淘汰与出栏</p><strong>{{ summary.exitedCount }}<small>头</small></strong></div>
         </article>
       </div>
+
+      <section class="livestock-analysis" aria-labelledby="livestockAnalysisTitle">
+        <header class="analysis-section-header">
+          <div>
+            <h2 id="livestockAnalysisTitle">农场生产分析</h2>
+            <span>{{ analysis?.period.dateFrom ?? "-" }} 至 {{ analysis?.period.dateTo ?? "-" }} · 死亡率按累计入栏口径</span>
+          </div>
+          <el-select v-model="analysisFilters.trendDays" class="livestock-analysis-period" aria-label="养殖趋势统计周期" @change="loadAnalysis">
+            <el-option label="近 7 天" :value="7" />
+            <el-option label="近 30 天" :value="30" />
+            <el-option label="近 90 天" :value="90" />
+          </el-select>
+        </header>
+        <div v-loading="analysisLoading" class="livestock-analysis-content">
+          <div class="livestock-analysis-chart-shell">
+            <livestock-farm-trend-chart :data="analysis?.trend ?? []" />
+          </div>
+          <header class="livestock-comparison-header">
+            <div><h3>批次指标对比</h3><span>最近 10 个批次，支持查看原始记录</span></div>
+          </header>
+          <div class="farm-table-shell">
+            <el-table :data="analysis?.batchComparisons ?? []" row-key="batchId" empty-text="当前农场暂无可对比批次">
+              <el-table-column label="批次" :min-width="compactTable ? 225 : 180">
+                <template #default="scope">
+                  <div class="farm-name-cell">
+                    <strong>{{ scope.row.name }}</strong>
+                    <span>{{ scope.row.batchNo }} · {{ scope.row.entryDate }}</span>
+                    <span v-if="compactTable">存栏 {{ scope.row.currentHeadCount }} 头 · 死亡率 {{ scope.row.mortalityRate }}% · 生产成本 ¥ {{ scope.row.productionCost }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="!compactTable" label="当前存栏" width="105" align="right"><template #default="scope">{{ scope.row.currentHeadCount }} 头</template></el-table-column>
+              <el-table-column v-if="!compactTable" label="死亡率" width="100" align="right"><template #default="scope">{{ scope.row.mortalityRate }}%</template></el-table-column>
+              <el-table-column v-if="!compactTable" label="最新均重" width="110" align="right"><template #default="scope">{{ scope.row.latestAverageWeight ? `${scope.row.latestAverageWeight} kg` : "-" }}</template></el-table-column>
+              <el-table-column v-if="!compactTable" label="ADG" width="105" align="right"><template #default="scope">{{ scope.row.adg ? `${scope.row.adg} kg/天` : "-" }}</template></el-table-column>
+              <el-table-column v-if="!compactTable" label="FCR" width="90" align="right"><template #default="scope">{{ scope.row.fcr ?? "-" }}<small v-if="scope.row.fcrEstimated"> 估</small></template></el-table-column>
+              <el-table-column v-if="!compactTable" label="生产成本" width="125" align="right"><template #default="scope">¥ {{ scope.row.productionCost }}</template></el-table-column>
+              <el-table-column label="操作" width="74" fixed="right">
+                <template #default="scope"><el-tooltip content="查看批次"><el-button circle :icon="View" aria-label="查看对比批次" @click="openDetail({ id: scope.row.batchId })" /></el-tooltip></template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </section>
 
       <div class="farm-toolbar livestock-toolbar" role="search" aria-label="筛选生猪批次">
         <el-input
@@ -764,7 +892,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
           <div class="livestock-detail-heading">
             <div class="farm-name-cell"><strong>{{ detailBatch.name }}</strong><span>{{ detailBatch.batchNo }} · {{ detailBatch.entryDate }} 入栏</span></div>
             <div class="farm-actions">
-              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" type="primary" :icon="Plus" @click="openProduction('feeding')">生产记录</el-button>
+              <el-button v-if="canOperate" type="primary" :icon="Plus" @click="openProduction(detailBatch.status === 'ACTIVE' ? 'feeding' : 'cost')">{{ detailBatch.status === "ACTIVE" ? "生产记录" : "补录成本" }}</el-button>
               <el-tag :type="detailBatch.status === 'ACTIVE' ? 'success' : 'info'" effect="plain">{{ batchStatusName(detailBatch.status) }}</el-tag>
             </div>
           </div>
@@ -775,9 +903,41 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
             <div><span>累计出栏</span><strong>{{ detailBatch.exitCount }} 头</strong></div>
             <div><span>最近均重</span><strong>{{ detailBatch.productionSummary?.latestAverageWeight ?? "-" }}<template v-if="detailBatch.productionSummary?.latestAverageWeight"> kg</template></strong></div>
             <div><span>日增重 ADG</span><strong>{{ detailBatch.productionSummary?.adg ?? "-" }}<template v-if="detailBatch.productionSummary?.adg"> kg/天</template></strong></div>
-            <div><span>饲料成本</span><strong>¥ {{ detailBatch.productionSummary?.totalFeedCost ?? "0.00" }}</strong></div>
-            <div><span>健康记录</span><strong>{{ detailBatch.productionSummary?.healthRecordCount ?? 0 }} 条</strong></div>
+            <div><span>累计饲料</span><strong>{{ detailBatch.productionSummary?.feedWeightComplete ? detailBatch.productionSummary.totalFeedWeightKg : "单位待换算" }}<template v-if="detailBatch.productionSummary?.feedWeightComplete"> kg</template></strong></div>
+            <div><span>料肉比 FCR</span><strong>{{ detailBatch.productionSummary?.fcr ?? "-" }}<template v-if="detailBatch.productionSummary?.fcrEstimated">（估算）</template></strong></div>
+            <div><span>直接物料成本</span><strong>¥ {{ detailBatch.productionSummary?.totalDirectCost ?? "0.00" }}</strong></div>
+            <div><span>其他生产成本</span><strong>¥ {{ detailBatch.productionSummary?.totalAdditionalCost ?? "0.00" }}</strong></div>
+            <div><span>批次生产成本</span><strong>¥ {{ detailBatch.productionSummary?.totalProductionCost ?? "0.00" }}</strong></div>
+            <div><span>头均生产成本</span><strong><template v-if="detailBatch.productionSummary?.productionCostPerHead">¥ {{ detailBatch.productionSummary.productionCostPerHead }}<small>{{ detailBatch.productionSummary.productionCostPerHeadBasis === "EXITED" ? " / 已出栏" : " / 在养估算" }}</small></template><template v-else>-</template></strong></div>
           </div>
+          <section class="livestock-detail-section">
+            <header><h2>生产趋势</h2><span>存栏来自数量流水，均重仅显示实际抽样记录</span></header>
+            <LivestockProductionTrendChart :data="detailBatch.productionTrend ?? []" />
+          </section>
+          <section class="livestock-detail-section">
+            <header>
+              <h2>入栏、人工与公共费用</h2>
+              <el-button v-if="canOperate" text type="primary" @click="openProduction('cost')">登记成本</el-button>
+            </header>
+            <div class="livestock-cost-breakdown" aria-label="批次其他生产成本结构">
+              <div v-for="item in detailBatch.productionSummary?.additionalCostBreakdown ?? []" :key="item.costType">
+                <span>{{ costTypeNames[item.costType as LivestockCostType] }}</span>
+                <strong>¥ {{ item.amount }}</strong>
+                <small>{{ item.recordCount }} 笔有效记录</small>
+              </div>
+              <p v-if="!detailBatch.productionSummary?.additionalCostBreakdown.length">暂无入栏、人工或公共费用</p>
+            </div>
+            <div class="farm-table-shell">
+              <el-table :data="detailBatch.costEntries ?? []" row-key="id" empty-text="暂无其他生产成本记录">
+                <el-table-column label="日期 / 单号" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.businessDate }}</strong><span>{{ scope.row.entryNo }}</span></div></template></el-table-column>
+                <el-table-column label="类型" width="130"><template #default="scope">{{ costTypeNames[scope.row.costType as LivestockCostType] }}</template></el-table-column>
+                <el-table-column label="说明" min-width="180"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.description }}</strong><span>{{ scope.row.notes || "无备注" }}</span></div></template></el-table-column>
+                <el-table-column label="金额" width="120" align="right"><template #default="scope"><strong :class="{ 'cancelled-cost': scope.row.status === 'CANCELLED' }">¥ {{ scope.row.amount }}</strong></template></el-table-column>
+                <el-table-column label="状态" width="90"><template #default="scope"><el-tag :type="scope.row.status === 'POSTED' ? 'success' : 'info'" effect="plain">{{ scope.row.status === "POSTED" ? "有效" : "已撤销" }}</el-tag></template></el-table-column>
+                <el-table-column v-if="canOperate" label="操作" width="74" fixed="right"><template #default="scope"><el-button v-if="scope.row.status === 'POSTED'" link type="danger" @click="cancelCostEntry(scope.row)">撤销</el-button></template></el-table-column>
+              </el-table>
+            </div>
+          </section>
           <section class="livestock-detail-section">
             <header><h2>当前圈舍分布</h2><span>{{ detailBatch.source || "未填写来源" }}</span></header>
             <div class="farm-table-shell">
@@ -790,16 +950,24 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
           </section>
           <section class="livestock-detail-section">
             <header>
-              <h2>饲喂与领料</h2>
-              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" text type="primary" @click="openProduction('feeding')">登记喂料</el-button>
+              <h2>批次直接成本</h2>
+              <el-button v-if="canOperate && detailBatch.status === 'ACTIVE'" text type="primary" @click="openProduction('feeding')">领用物料</el-button>
             </header>
+            <div class="livestock-cost-breakdown" aria-label="批次直接成本结构">
+              <div v-for="item in detailBatch.productionSummary?.costBreakdown ?? []" :key="item.category">
+                <span>{{ costCategoryName(item.category) }}</span>
+                <strong>¥ {{ item.amount }}</strong>
+                <small>{{ item.recordCount }} 笔</small>
+              </div>
+              <p v-if="!detailBatch.productionSummary?.costBreakdown.length">暂无已归集成本</p>
+            </div>
             <div class="farm-table-shell">
-              <el-table :data="detailBatch.feedingRecords ?? []" row-key="id" empty-text="暂无饲喂领料记录">
+              <el-table :data="detailBatch.materialRecords ?? []" row-key="id" empty-text="暂无批次领退料记录">
                 <el-table-column label="日期 / 单号" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.operationDate }}</strong><span>{{ scope.row.documentNo }}</span></div></template></el-table-column>
-                <el-table-column label="饲料" min-width="170"><template #default="scope">{{ scope.row.itemName }}（{{ scope.row.itemCode }}）</template></el-table-column>
+                <el-table-column label="物料" min-width="170"><template #default="scope"><div class="farm-name-cell"><strong>{{ scope.row.itemName }}</strong><span>{{ costCategoryName(scope.row.itemType) }} · {{ scope.row.itemCode }}</span></div></template></el-table-column>
                 <el-table-column label="仓库" min-width="120" prop="warehouseName" />
                 <el-table-column label="数量" width="110" align="right"><template #default="scope"><strong>{{ scope.row.operationType === 'return' ? '-' : '' }}{{ scope.row.quantity }}</strong> {{ scope.row.unitName }}</template></el-table-column>
-                <el-table-column label="金额" width="110" align="right"><template #default="scope">¥ {{ scope.row.amount }}</template></el-table-column>
+                <el-table-column label="计入成本" width="120" align="right"><template #default="scope">{{ scope.row.operationType === 'return' ? '-' : '' }}¥ {{ scope.row.amount }}</template></el-table-column>
               </el-table>
             </div>
           </section>
@@ -850,9 +1018,10 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
 
     <el-dialog v-model="productionDialogVisible" title="登记生产记录" width="min(94vw, 680px)" destroy-on-close>
       <el-radio-group v-model="productionType" class="production-type" aria-label="生产记录类型">
-        <el-radio-button value="feeding">喂料</el-radio-button>
-        <el-radio-button value="health">健康 / 用药</el-radio-button>
-        <el-radio-button value="weight">称重</el-radio-button>
+        <el-radio-button value="feeding" :disabled="detailBatch?.status === 'CLOSED'">物料领用</el-radio-button>
+        <el-radio-button value="health" :disabled="detailBatch?.status === 'CLOSED'">健康 / 用药</el-radio-button>
+        <el-radio-button value="weight" :disabled="detailBatch?.status === 'CLOSED'">称重</el-radio-button>
+        <el-radio-button value="cost">生产成本</el-radio-button>
       </el-radio-group>
       <el-form label-position="top" @submit.prevent="saveProductionRecord">
         <div class="farm-form-grid">
@@ -860,9 +1029,9 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
           <el-form-item label="业务日期" required><el-date-picker v-model="productionForm.occurredOn" type="date" value-format="YYYY-MM-DD" class="full-width-control" :disabled-date="(value: Date) => value.getTime() > Date.now()" /></el-form-item>
           <template v-if="productionType === 'feeding'">
             <el-form-item label="领料仓库" required><el-select v-model="productionForm.warehouseId" class="full-width-control"><el-option v-for="item in warehouses" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item>
-            <el-form-item label="饲料" required><el-select v-model="productionForm.itemId" class="full-width-control"><el-option v-for="item in feedItems" :key="item.id" :label="`${item.name} (${item.unitName})`" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="领用物料" required><el-select v-model="productionForm.itemId" class="full-width-control"><el-option v-for="item in productionItems" :key="item.id" :label="`${item.name} · ${costCategoryName(item.itemType)} (${item.unitName})`" :value="item.id" /></el-select></el-form-item>
             <el-form-item label="领用数量" required><el-input-number v-model="productionForm.quantity" class="full-width-control" :min="0.001" :precision="3" controls-position="right" /></el-form-item>
-            <el-form-item label="批号"><el-input v-model="productionForm.lotNo" maxlength="64" placeholder="启用批次管理的饲料必填" /></el-form-item>
+            <el-form-item label="批号"><el-input v-model="productionForm.lotNo" maxlength="64" placeholder="启用批次管理的物料必填" /></el-form-item>
           </template>
           <template v-else-if="productionType === 'health'">
             <el-form-item label="记录类型" required><el-select v-model="productionForm.healthType" class="full-width-control"><el-option v-for="(label, value) in healthTypeNames" :key="value" :label="label" :value="value" /></el-select></el-form-item>
@@ -870,14 +1039,19 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
             <el-form-item label="药品 / 疫苗"><el-input v-model="productionForm.medicineName" maxlength="120" /></el-form-item>
             <el-form-item label="剂量"><el-input v-model="productionForm.dosage" maxlength="80" placeholder="例如 每头 1 头份" /></el-form-item>
           </template>
-          <template v-else>
+          <template v-else-if="productionType === 'weight'">
             <el-form-item label="抽样头数" required><el-input-number v-model="productionForm.sampleCount" class="full-width-control" :min="1" :precision="0" controls-position="right" /></el-form-item>
             <el-form-item label="平均体重（kg）" required><el-input-number v-model="productionForm.averageWeight" class="full-width-control" :min="0.001" :precision="3" controls-position="right" /></el-form-item>
+          </template>
+          <template v-else>
+            <el-form-item label="成本类型" required><el-select v-model="productionForm.costType" class="full-width-control"><el-option v-for="(label, value) in costTypeNames" :key="value" :label="label" :value="value" /></el-select></el-form-item>
+            <el-form-item label="金额（元）" required><el-input-number v-model="productionForm.amount" class="full-width-control" :min="0.01" :max="99999999999999.99" :precision="2" controls-position="right" /></el-form-item>
+            <el-form-item label="成本说明" required class="farm-form-span"><el-input v-model="productionForm.description" maxlength="255" placeholder="例如 仔猪采购款或本月饲养人工" /></el-form-item>
           </template>
           <el-form-item v-if="productionType !== 'feeding'" label="备注" class="farm-form-span"><el-input v-model="productionForm.notes" maxlength="500" /></el-form-item>
         </div>
       </el-form>
-      <el-alert v-if="productionType === 'feeding' && (!warehouses.length || !feedItems.length)" type="warning" :closable="false" title="请先在库存管理中建立可用仓库和饲料物料，并完成采购入库。" />
+      <el-alert v-if="productionType === 'feeding' && (!warehouses.length || !productionItems.length)" type="warning" :closable="false" title="请先在库存管理中建立可用仓库和生产物料，并完成采购入库。" />
       <template #footer>
         <el-button @click="productionDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="productionSaving" @click="saveProductionRecord">确认登记</el-button>
@@ -889,6 +1063,48 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
 <style scoped>
 .livestock-toolbar {
   grid-template-columns: minmax(240px, 1fr) 150px auto auto;
+}
+
+.livestock-analysis {
+  min-width: 0;
+}
+
+.livestock-analysis-period {
+  width: 130px;
+  flex: 0 0 130px;
+}
+
+.livestock-analysis-content {
+  min-height: 390px;
+}
+
+.livestock-analysis-chart-shell {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.livestock-farm-trend-chart {
+  width: 100%;
+  height: 290px;
+}
+
+.livestock-comparison-header {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+}
+
+.livestock-comparison-header h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.livestock-comparison-header span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .summary-card small {
@@ -952,6 +1168,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
   font-size: 18px;
 }
 
+.livestock-detail-summary strong small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .livestock-detail-section {
   margin-top: 18px;
 }
@@ -964,6 +1186,56 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
   margin: 0;
   color: var(--ink);
   font-size: 15px;
+}
+
+.livestock-production-trend-chart {
+  width: 100%;
+  height: 280px;
+}
+
+.livestock-cost-breakdown {
+  display: grid;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.livestock-cost-breakdown > div {
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px 12px;
+  flex-direction: column;
+  gap: 3px;
+  border-right: 1px solid var(--line);
+}
+
+.livestock-cost-breakdown > div:last-child {
+  border-right: 0;
+}
+
+.livestock-cost-breakdown span,
+.livestock-cost-breakdown small,
+.livestock-cost-breakdown > p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.livestock-cost-breakdown strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.livestock-cost-breakdown > p {
+  margin: 0;
+  padding: 16px;
+  grid-column: 1 / -1;
+}
+
+.cancelled-cost {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 @media (max-width: 900px) {
@@ -995,6 +1267,32 @@ onBeforeUnmount(() => window.removeEventListener("resize", updateTableLayout));
 
   .livestock-detail-summary > div:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line);
+  }
+
+  .livestock-production-trend-chart {
+    height: 240px;
+  }
+
+  .livestock-farm-trend-chart {
+    height: 250px;
+  }
+
+  .livestock-analysis-chart-shell {
+    padding: 12px;
+  }
+
+  .livestock-analysis .analysis-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .livestock-analysis-period {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .livestock-cost-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

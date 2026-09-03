@@ -86,6 +86,30 @@ export const router = createRouter({
           meta: { title: "生猪管理" },
         },
         {
+          path: "crop/cycles",
+          name: "crop-cycles",
+          component: () => import("@/modules/crop/CropCycleView.vue"),
+          meta: { title: "种植周期" },
+        },
+        {
+          path: "crop/operations",
+          name: "field-operations",
+          component: () => import("@/modules/crop/FieldOperationView.vue"),
+          meta: { title: "农事操作" },
+        },
+        {
+          path: "crop/harvests",
+          name: "harvest-batches",
+          component: () => import("@/modules/crop/HarvestBatchView.vue"),
+          meta: { title: "采收批次" },
+        },
+        {
+          path: "crop/curing",
+          name: "tobacco-curing",
+          component: () => import("@/modules/crop/TobaccoCuringView.vue"),
+          meta: { title: "烟草烘烤" },
+        },
+        {
           path: "admin/users",
           name: "admin-users",
           component: () => import("@/modules/admin/UserManagementView.vue"),

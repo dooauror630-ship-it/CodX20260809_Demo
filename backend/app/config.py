@@ -32,10 +32,11 @@ def get_secret_key():
 
 def get_mysql_config():
     config_file = Path(os.getenv("AGRI_MYSQL_CONFIG", INSTANCE_DIR / "mysql.json"))
-    if not config_file.exists():
-        raise RuntimeError(f"MySQL config was not found: {config_file}")
-
-    file_config = json.loads(config_file.read_text(encoding="utf-8"))
+    file_config = (
+        json.loads(config_file.read_text(encoding="utf-8"))
+        if config_file.exists()
+        else {}
+    )
     config = {
         "host": os.getenv("AGRI_MYSQL_HOST", file_config.get("host", "127.0.0.1")),
         "port": int(os.getenv("AGRI_MYSQL_PORT", file_config.get("port", 3306))),
@@ -61,6 +62,8 @@ def configure_app(app, test_config=None):
         SESSION_COOKIE_SECURE=env_bool("AGRI_COOKIE_SECURE"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         ALLOW_SELF_REGISTRATION=env_bool("AGRI_ALLOW_SELF_REGISTRATION", True),
+        AGENT_API_KEY=os.getenv("AGRI_AGENT_API_KEY", ""),
+        AGENT_FARM_CODE=os.getenv("AGRI_AGENT_FARM_CODE", "AGENT-DEMO"),
         SKIP_SCHEMA_CHECK=env_bool("AGRI_SKIP_SCHEMA_CHECK"),
     )
     if test_config:

@@ -5,16 +5,21 @@ from ...core.security import login_required
 from ..auth.schemas import parse_payload
 from .schemas import (
     CreateLivestockBatchPayload,
+    CreateLivestockCostEntryPayload,
     CreateLivestockHealthRecordPayload,
     CreateLivestockMovementPayload,
     CreateLivestockWeightRecordPayload,
+    LivestockAnalysisQuery,
     LivestockBatchListQuery,
 )
 from .service import (
     create_livestock_batch,
+    cancel_livestock_cost_entry,
+    create_livestock_cost_entry,
     create_livestock_health_record,
     create_livestock_movement,
     create_livestock_weight_record,
+    livestock_analysis,
     livestock_batch_detail,
     list_livestock_batches,
 )
@@ -28,6 +33,13 @@ livestock_bp = Blueprint("livestock", __name__)
 def livestock_batches():
     query = parse_payload(LivestockBatchListQuery, request.args.to_dict(), "养殖批次筛选条件格式错误")
     return success_response(list_livestock_batches(query, g.current_user))
+
+
+@livestock_bp.get("/livestock-analysis")
+@login_required
+def livestock_analysis_overview():
+    query = parse_payload(LivestockAnalysisQuery, request.args.to_dict(), "生猪分析筛选条件格式错误")
+    return success_response(livestock_analysis(query, g.current_user))
 
 
 @livestock_bp.get("/livestock-batches/<int:batch_id>")
@@ -81,4 +93,25 @@ def add_livestock_weight_record():
         {"record": record},
         "称重记录已登记" if created else "该称重记录已登记",
         201 if created else 200,
+    )
+
+
+@livestock_bp.post("/livestock-cost-entries")
+@login_required
+def add_livestock_cost_entry():
+    payload = parse_payload(CreateLivestockCostEntryPayload, request.get_json(silent=True), "生猪成本记录格式错误")
+    entry, created = create_livestock_cost_entry(payload, g.current_user)
+    return success_response(
+        {"costEntry": entry},
+        "批次成本已登记" if created else "该批次成本已登记",
+        201 if created else 200,
+    )
+
+
+@livestock_bp.post("/livestock-cost-entries/<int:entry_id>/cancel")
+@login_required
+def cancel_livestock_cost_entry_record(entry_id):
+    return success_response(
+        {"costEntry": cancel_livestock_cost_entry(entry_id, g.current_user)},
+        "批次成本已撤销",
     )

@@ -1,0 +1,82 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "综合农牧业管理系统智能体工具",
+    "version": "1.0.0",
+    "description": "供 Dify 智能体只读查询 AGENT-DEMO 测试农场、库存预警和生猪养殖概览。"
+  },
+  "servers": [
+    {
+      "url": "https://modem-royal-editors-advert.trycloudflare.com"
+    }
+  ],
+  "paths": {
+    "/api/v1/agent/farms": {
+      "get": {
+        "operationId": "listFarms",
+        "summary": "查询可用农场",
+        "description": "返回所有启用农场的编号、名称、负责人和地址，供后续工具选择 farmId。",
+        "security": [{"ApiKeyAuth": []}],
+        "responses": {
+          "200": {"description": "查询成功"},
+          "401": {"description": "API Key 无效或缺失"}
+        }
+      }
+    },
+    "/api/v1/agent/inventory-summary": {
+      "get": {
+        "operationId": "getInventorySummary",
+        "summary": "查询库存预警",
+        "description": "返回指定农场的库存总值、库存品项数和最多 20 条低库存物料。",
+        "security": [{"ApiKeyAuth": []}],
+        "parameters": [
+          {
+            "name": "farmId",
+            "in": "query",
+            "required": true,
+            "description": "农场 ID，可先调用查询可用农场工具获得。",
+            "schema": {"type": "integer", "minimum": 1, "example": 1}
+          }
+        ],
+        "responses": {
+          "200": {"description": "查询成功"},
+          "400": {"description": "farmId 格式错误"},
+          "401": {"description": "API Key 无效或缺失"},
+          "404": {"description": "农场不存在"}
+        }
+      }
+    },
+    "/api/v1/agent/livestock-summary": {
+      "get": {
+        "operationId": "getLivestockSummary",
+        "summary": "查询生猪养殖概览",
+        "description": "返回指定农场的存栏汇总、最多 20 个在养批次及最近健康和称重记录。",
+        "security": [{"ApiKeyAuth": []}],
+        "parameters": [
+          {
+            "name": "farmId",
+            "in": "query",
+            "required": true,
+            "description": "农场 ID，可先调用查询可用农场工具获得。",
+            "schema": {"type": "integer", "minimum": 1, "example": 1}
+          }
+        ],
+        "responses": {
+          "200": {"description": "查询成功"},
+          "400": {"description": "farmId 格式错误"},
+          "401": {"description": "API Key 无效或缺失"},
+          "404": {"description": "农场不存在"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    }
+  }
+}

@@ -1,15 +1,19 @@
 import { apiClient } from "./client";
 import type {
   CreateLivestockBatchInput,
+  CreateLivestockCostEntryInput,
   CreateLivestockHealthRecordInput,
   CreateLivestockMovementInput,
   CreateLivestockWeightRecordInput,
   LivestockBatch,
   LivestockBatchListData,
   LivestockBatchListQuery,
+  LivestockAnalysis,
+  LivestockAnalysisQuery,
   LivestockMovement,
   LivestockHealthRecord,
   LivestockWeightRecord,
+  LivestockCostEntry,
 } from "@/types/livestock";
 
 
@@ -23,6 +27,12 @@ interface DataResponse<T> {
 export async function getLivestockBatches(query: LivestockBatchListQuery) {
   return (
     await apiClient.get<DataResponse<LivestockBatchListData>>("/livestock-batches", { params: query })
+  ).data.data;
+}
+
+export async function getLivestockAnalysis(query: LivestockAnalysisQuery) {
+  return (
+    await apiClient.get<DataResponse<LivestockAnalysis>>("/livestock-analysis", { params: query })
   ).data.data;
 }
 
@@ -57,4 +67,18 @@ export async function createLivestockWeightRecord(input: CreateLivestockWeightRe
   return (
     await apiClient.post<DataResponse<{ record: LivestockWeightRecord }>>("/livestock-weight-records", input)
   ).data.data.record;
+}
+
+export async function createLivestockCostEntry(input: CreateLivestockCostEntryInput) {
+  return (
+    await apiClient.post<DataResponse<{ costEntry: LivestockCostEntry }>>("/livestock-cost-entries", input)
+  ).data.data.costEntry;
+}
+
+export async function cancelLivestockCostEntry(entryId: number) {
+  return (
+    await apiClient.post<DataResponse<{ costEntry: LivestockCostEntry }>>(
+      `/livestock-cost-entries/${entryId}/cancel`,
+    )
+  ).data.data.costEntry;
 }

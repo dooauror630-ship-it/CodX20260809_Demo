@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_v
 LivestockBatchStatus = Literal["all", "ACTIVE", "CLOSED"]
 LivestockMovementType = Literal["TRANSFER", "DEATH", "CULL", "EXIT"]
 LivestockHealthType = Literal["VACCINATION", "MEDICATION", "DISEASE", "OTHER"]
+LivestockCostType = Literal["ENTRY", "LABOR", "OVERHEAD", "OTHER"]
 
 
 class LivestockBatchListQuery(BaseModel):
@@ -18,6 +19,13 @@ class LivestockBatchListQuery(BaseModel):
     page_size: int = Field(default=20, alias="pageSize", ge=1, le=100)
     keyword: str = Field(default="", max_length=100)
     status: LivestockBatchStatus = "all"
+
+
+class LivestockAnalysisQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    farm_id: int = Field(alias="farmId", gt=0)
+    trend_days: int = Field(default=30, alias="trendDays", ge=7, le=90)
 
 
 class CreateLivestockBatchPayload(BaseModel):
@@ -130,4 +138,27 @@ class CreateLivestockWeightRecordPayload(BaseModel):
     @field_validator("notes")
     @classmethod
     def normalize_optional_text(cls, value):
+        return value or None
+
+
+class CreateLivestockCostEntryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    farm_id: StrictInt = Field(alias="farmId", gt=0)
+    batch_id: StrictInt = Field(alias="batchId", gt=0)
+    entry_no: StrictStr = Field(alias="entryNo", min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    business_date: date = Field(alias="businessDate")
+    cost_type: LivestockCostType = Field(alias="costType")
+    amount: Decimal = Field(gt=0, max_digits=16, decimal_places=2)
+    description: StrictStr = Field(min_length=2, max_length=255)
+    notes: StrictStr | None = Field(default=None, max_length=500)
+
+    @field_validator("entry_no")
+    @classmethod
+    def normalize_entry_no(cls, value):
+        return value.upper()
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_cost_notes(cls, value):
         return value or None

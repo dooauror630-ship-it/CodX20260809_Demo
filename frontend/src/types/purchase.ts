@@ -184,7 +184,7 @@ export interface StockLedgerEntry {
   amount: string;
   lotNo: string | null;
   expiresOn: string | null;
-  costObjectType: "FARM" | "BARN" | "PLOT" | null;
+  costObjectType: "FARM" | "BARN" | "PLOT" | "LIVESTOCK_BATCH" | "CROP_CYCLE" | null;
   costObjectId: number | null;
 }
 
@@ -222,7 +222,7 @@ export interface StockTransfer {
 }
 
 export type ProductionStockOperationType = "issue" | "return";
-export type ProductionCostObjectType = "farm" | "barn" | "plot" | "livestock_batch";
+export type ProductionCostObjectType = "farm" | "barn" | "plot" | "livestock_batch" | "crop_cycle";
 
 export interface CreateProductionStockOperationInput {
   farmId: number;
@@ -249,7 +249,10 @@ export interface ProductionStockOperation {
   itemId: number;
   itemCode: string;
   itemName: string;
+  itemType: string;
   unitName: string;
+  unitDimension: string;
+  unitBaseFactor: string;
   quantity: string;
   unitCost: string;
   amount: string;

@@ -128,6 +128,22 @@ onMounted(() => void loadFarmContext());
           <el-icon><Food /></el-icon>
           <span>生猪管理</span>
         </router-link>
+        <router-link to="/crop/cycles" class="sidebar-link">
+          <el-icon><MapLocation /></el-icon>
+          <span>种植周期</span>
+        </router-link>
+        <router-link to="/crop/operations" class="sidebar-link">
+          <el-icon><Tickets /></el-icon>
+          <span>农事操作</span>
+        </router-link>
+        <router-link to="/crop/harvests" class="sidebar-link">
+          <el-icon><Collection /></el-icon>
+          <span>采收批次</span>
+        </router-link>
+        <router-link to="/crop/curing" class="sidebar-link">
+          <el-icon><Tickets /></el-icon>
+          <span>烟草烘烤</span>
+        </router-link>
         <router-link v-if="auth.isAdmin" to="/admin/users" class="sidebar-link">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
