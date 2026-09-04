@@ -19,6 +19,9 @@ class FarmOverviewTestCase(unittest.TestCase):
             response = client.get("/api/v1/analytics/farm-overview", query_string={"farmId": farm["id"]})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.get_json()["data"]["trade"]["grossProfit"], "0.00")
+            export = client.get("/api/v1/analytics/trade-profit.csv", query_string={"farmId": farm["id"]})
+            self.assertEqual(export.status_code, 200)
+            self.assertIn("orderNo", export.get_data(as_text=True))
             with app.app_context():
                 db.session.remove()
                 db.engine.dispose()
