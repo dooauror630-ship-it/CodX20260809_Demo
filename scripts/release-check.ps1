@@ -16,6 +16,7 @@ try {
     pytest -q
     npm.cmd --prefix frontend run build
     & (Join-Path $PSScriptRoot "migration-chain-check.ps1") -ProjectRoot $ProjectRoot
+    & (Join-Path $PSScriptRoot "security-scan.ps1") -ProjectRoot $ProjectRoot
     python -m flask --app backend.wsgi:app trade-reconcile
     if ($LASTEXITCODE -ne 0) { throw "Trade reconciliation failed." }
 } finally {
