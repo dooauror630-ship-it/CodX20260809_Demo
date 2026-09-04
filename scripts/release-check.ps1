@@ -15,6 +15,7 @@ try {
     ruff check backend tests
     pytest -q
     npm.cmd --prefix frontend run build
+    & (Join-Path $PSScriptRoot "migration-chain-check.ps1") -ProjectRoot $ProjectRoot
 } finally {
     Pop-Location
 }
