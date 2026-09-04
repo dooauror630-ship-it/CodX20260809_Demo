@@ -18,6 +18,7 @@ from .service import (
     list_sales_orders,
     post_sales_order,
     trade_summary,
+    trade_profit,
     sales_order_detail,
     create_sales_return,
 )
@@ -96,3 +97,9 @@ def sales_returns():
 @login_required
 def summary():
     return success_response(trade_summary(request.args.get("farmId", type=int), g.current_user))
+
+
+@trade_bp.get("/trade-profit")
+@login_required
+def profit():
+    return success_response({"items": trade_profit(request.args.get("farmId", type=int), g.current_user)})

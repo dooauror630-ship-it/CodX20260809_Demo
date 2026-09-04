@@ -104,7 +104,7 @@ class TradeTestCase(unittest.TestCase):
                 "farmId": self.farm["id"],
                 "paymentNo": "PAY-01",
                 "businessDate": date.today().isoformat(),
-                "amount": 100,
+                "amount": 75,
                 "method": "转账",
                 "customerId": customer["id"],
                 "salesOrderId": order["id"],
@@ -113,7 +113,7 @@ class TradeTestCase(unittest.TestCase):
         self.assertEqual(payment.status_code, 201)
         summary = self.client.get("/api/v1/trade-summary", query_string={"farmId": self.farm["id"]}).get_json()["data"]
         self.assertEqual(
-            summary, {"postedSalesAmount": "100.00", "salesCost": "40.00", "grossProfit": "60.00", "receivedAmount": "100.00", "cashNetInflow": "100.00", "receivableAmount": "0.00"}
+            summary, {"postedSalesAmount": "75.00", "salesCost": "30.00", "grossProfit": "45.00", "receivedAmount": "75.00", "cashNetInflow": "75.00", "receivableAmount": "0.00"}
         )
         insufficient = self.post(
             "/sales-orders",

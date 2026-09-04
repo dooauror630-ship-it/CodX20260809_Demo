@@ -324,6 +324,8 @@ def trade_summary(farm_id, actor):
         .join(SalesOrder, SalesOrder.id == SalesOrderLine.sales_order_id)
         .where(SalesOrder.farm_id == farm_id, SalesOrder.status == "POSTED")
     ) or 0
+    returned_revenue = db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.amount), 0)).join(SalesReturn).where(SalesReturn.farm_id == farm_id, SalesReturn.status == "POSTED")) or 0
+    returned_cost = db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.quantity * SalesReturnLine.unit_cost), 0)).join(SalesReturn).where(SalesReturn.farm_id == farm_id, SalesReturn.status == "POSTED")) or 0
     received = (
         db.session.scalar(
             select(func.coalesce(func.sum(Payment.amount), 0)).where(
@@ -333,10 +335,23 @@ def trade_summary(farm_id, actor):
         or 0
     )
     return {
-        "postedSalesAmount": f"{Decimal(revenue):.2f}",
-        "salesCost": f"{Decimal(cost):.2f}",
-        "grossProfit": f"{Decimal(revenue) - Decimal(cost):.2f}",
+        "postedSalesAmount": f"{Decimal(revenue) - Decimal(returned_revenue):.2f}",
+        "salesCost": f"{Decimal(cost) - Decimal(returned_cost):.2f}",
+        "grossProfit": f"{Decimal(revenue) - Decimal(returned_revenue) - Decimal(cost) + Decimal(returned_cost):.2f}",
         "receivedAmount": f"{Decimal(received):.2f}",
         "cashNetInflow": f"{Decimal(received):.2f}",
-        "receivableAmount": f"{Decimal(revenue) - Decimal(received):.2f}",
+        "receivableAmount": f"{Decimal(revenue) - Decimal(returned_revenue) - Decimal(received):.2f}",
     }
+
+
+def trade_profit(farm_id, actor):
+    get_accessible_farm(farm_id, actor)
+    orders = db.session.scalars(select(SalesOrder).where(SalesOrder.farm_id == farm_id, SalesOrder.status == "POSTED").order_by(SalesOrder.sale_date.desc(), SalesOrder.id.desc())).all()
+    result = []
+    for order in orders:
+        revenue = Decimal(order.total_amount or 0)
+        cost = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesOrderLine.quantity * SalesOrderLine.unit_cost), 0)).where(SalesOrderLine.sales_order_id == order.id)) or 0)
+        returned_revenue = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.amount), 0)).join(SalesReturn).join(SalesOrderLine, SalesOrderLine.id == SalesReturnLine.sales_order_line_id).where(SalesReturn.sales_order_id == order.id, SalesReturn.status == "POSTED")) or 0)
+        returned_cost = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.quantity * SalesReturnLine.unit_cost), 0)).join(SalesReturn).join(SalesOrderLine, SalesOrderLine.id == SalesReturnLine.sales_order_line_id).where(SalesReturn.sales_order_id == order.id, SalesReturn.status == "POSTED")) or 0)
+        result.append({"orderId": order.id, "orderNo": order.order_no, "saleDate": order.sale_date.isoformat(), "revenue": f"{revenue - returned_revenue:.2f}", "cost": f"{cost - returned_cost:.2f}", "grossProfit": f"{revenue - returned_revenue - cost + returned_cost:.2f}", "receivedAmount": f"{Decimal(order.received_amount or 0):.2f}"})
+    return result

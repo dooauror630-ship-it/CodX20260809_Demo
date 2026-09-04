@@ -3,3 +3,4 @@ export interface SalesOrder { id: number; orderNo: string; customerId: number; c
 export interface SalesOrderLine { id: number; itemId: number; quantity: string; unitPrice: string; amount: string; unitCost: string; }
 export interface SalesReturn { id: number; returnNo: string; salesOrderId: number; returnDate: string; status: string; totalAmount: string; }
 export interface TradeSummary { postedSalesAmount: string; salesCost: string; grossProfit: string; receivedAmount: string; cashNetInflow: string; receivableAmount: string; }
+export interface TradeProfit { orderId: number; orderNo: string; saleDate: string; revenue: string; cost: string; grossProfit: string; receivedAmount: string; }
