@@ -876,9 +876,45 @@ def create_stock_transfer(payload, actor):
     return _stock_transfer_payload(document), True
 
 
-def _production_cost_object(farm, cost_object_type, cost_object_id):
+def _production_cost_object(farm, cost_object_type, cost_object_id, operation_date=None, operation_type=None):
     if cost_object_type == "farm":
         return "FARM", farm.id
+
+    if cost_object_type == "livestock_batch":
+        from ..livestock.models import LivestockBatch
+
+        batch = db.session.get(LivestockBatch, cost_object_id)
+        if batch is None:
+            raise ApiError("养殖批次不存在", 404, "COST_OBJECT_NOT_FOUND", "costObjectId")
+        if batch.farm_id != farm.id:
+            raise ApiError("养殖批次不属于当前农场", 409, "COST_OBJECT_FARM_MISMATCH", "costObjectId")
+        if operation_date and operation_date < batch.entry_date:
+            raise ApiError("领退料日期不能早于批次入栏日期", 409, "PRODUCTION_DATE_BEFORE_BATCH", "operationDate")
+        if operation_type == "issue" and batch.status != "ACTIVE":
+            raise ApiError("批次已结束，不能继续领料", 409, "LIVESTOCK_BATCH_CLOSED")
+        if operation_date and batch.closed_at and operation_date > batch.closed_at.date():
+            raise ApiError("领退料日期不能晚于批次结束日期", 409, "PRODUCTION_DATE_AFTER_BATCH", "operationDate")
+        return "LIVESTOCK_BATCH", batch.id
+
+    if cost_object_type == "crop_cycle":
+        from ..crop.models import CropCycle
+
+        cycle = db.session.get(CropCycle, cost_object_id)
+        if cycle is None:
+            raise ApiError("种植周期不存在", 404, "COST_OBJECT_NOT_FOUND", "costObjectId")
+        if cycle.farm_id != farm.id:
+            raise ApiError("种植周期不属于当前农场", 409, "COST_OBJECT_FARM_MISMATCH", "costObjectId")
+        if cycle.status in ("CLOSED", "CANCELLED"):
+            raise ApiError("种植周期已结束，不能办理领退料", 409, "CROP_CYCLE_CLOSED")
+        if operation_type == "issue" and cycle.status not in ("ACTIVE", "HARVESTING"):
+            raise ApiError("种植周期尚未开始，不能继续领料", 409, "CROP_CYCLE_NOT_ACTIVE")
+        lower_bound = cycle.actual_start_date or cycle.planned_start_date
+        upper_bound = cycle.actual_end_date or cycle.planned_end_date
+        if operation_date and operation_date < lower_bound:
+            raise ApiError("领退料日期不能早于种植周期开始日期", 409, "PRODUCTION_DATE_BEFORE_CROP_CYCLE", "operationDate")
+        if operation_date and operation_date > upper_bound:
+            raise ApiError("领退料日期不能晚于种植周期结束日期", 409, "PRODUCTION_DATE_AFTER_CROP_CYCLE", "operationDate")
+        return "CROP_CYCLE", cycle.id
 
     model, label = (Barn, "圈舍") if cost_object_type == "barn" else (Plot, "地块")
     cost_object = db.session.get(model, cost_object_id)
@@ -916,7 +952,10 @@ def _production_operation_payload(document):
         "itemId": item.id,
         "itemCode": item.code,
         "itemName": item.name,
+        "itemType": item.item_type,
         "unitName": unit.name,
+        "unitDimension": unit.dimension,
+        "unitBaseFactor": _number_text(unit.base_factor),
         "quantity": _number_text(quantity),
         "unitCost": _number_text(movement.unit_cost),
         "amount": _money_text(amount),
@@ -1008,6 +1047,8 @@ def create_production_stock_operation(payload, actor):
         farm,
         payload.cost_object_type,
         payload.cost_object_id,
+        payload.operation_date,
+        payload.operation_type,
     )
 
     balance = db.session.scalar(

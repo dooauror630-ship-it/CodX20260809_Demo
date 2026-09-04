@@ -1,0 +1,29 @@
+[Unit]
+Description=Agriculture Management API
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agriculture
+Group=agriculture
+WorkingDirectory=/opt/agriculture-management/app
+EnvironmentFile=/etc/agriculture-management/app.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/agriculture-management/venv/bin/waitress-serve --host=127.0.0.1 --port=5000 --threads=4 backend.wsgi:app
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/opt/agriculture-management/app/backend/instance
+
+[Install]
+WantedBy=multi-user.target

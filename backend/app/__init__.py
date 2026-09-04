@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0010_livestock"
+REQUIRED_SCHEMA_REVISION = "0023_attachments"
 
 
 REQUIRED_SCHEMA = {
@@ -101,6 +101,57 @@ REQUIRED_SCHEMA = {
         "id", "farm_id", "batch_id", "movement_no", "movement_type", "from_barn_id", "to_barn_id",
         "quantity", "occurred_on", "reason", "notes", "created_by_id", "created_at",
     },
+    "livestock_health_records": {
+        "id", "farm_id", "batch_id", "record_no", "record_type", "occurred_on",
+        "description", "medicine_name", "dosage", "notes", "created_by_id", "created_at",
+    },
+    "livestock_weight_records": {
+        "id", "farm_id", "batch_id", "record_no", "occurred_on", "sample_count",
+        "average_weight", "notes", "created_by_id", "created_at",
+    },
+    "cost_entries": {
+        "id", "farm_id", "livestock_batch_id", "entry_no", "business_date", "cost_type",
+        "amount", "description", "notes", "status", "cancelled_at", "cancelled_by_id",
+        "created_by_id", "created_at",
+    },
+    "crop_cycles": {
+        "id", "farm_id", "cycle_code", "plot_id", "crop_type_id", "variety_id", "area_mu",
+        "planned_start_date", "planned_end_date", "actual_start_date", "actual_end_date", "status",
+        "notes", "created_by_id", "updated_by_id", "created_at", "updated_at",
+    },
+    "crop_operation_templates": {
+        "id", "crop_type_id", "operation_type", "offset_days", "required", "default_notes", "created_at",
+    },
+    "field_operations": {
+        "id", "farm_id", "crop_cycle_id", "operation_type", "operation_date", "area_mu",
+        "labor_hours", "machine_hours", "labor_cost", "service_cost", "notes", "created_by_id", "created_at",
+    },
+    "harvest_batches": {
+        "id", "farm_id", "crop_cycle_id", "harvest_no", "harvest_date", "gross_weight", "net_weight",
+        "unit_id", "warehouse_id", "notes", "created_by_id", "created_at",
+    },
+    "tobacco_curing_batches": {
+        "id", "farm_id", "crop_cycle_id", "curing_no", "start_at", "end_at", "input_weight",
+        "output_weight", "unit_id", "fuel_cost", "electricity_cost", "status", "notes",
+        "created_by_id", "completed_by_id", "created_at",
+    },
+    "grading_records": {
+        "id", "farm_id", "harvest_batch_id", "grade_code", "quantity", "unit_price_reference",
+        "notes", "created_by_id", "created_at",
+    },
+    "field_operation_inputs": {
+        "id", "farm_id", "field_operation_id", "stock_document_id", "item_id", "quantity", "amount",
+        "created_by_id", "created_at",
+    },
+    "customers": {"id", "farm_id", "code", "name", "contact", "phone", "address", "is_active", "created_by_id", "updated_by_id", "created_at", "updated_at"},
+    "sales_orders": {"id", "farm_id", "order_no", "customer_id", "warehouse_id", "sale_date", "status", "total_amount", "received_amount", "notes", "posted_at", "posted_by_id", "created_by_id", "created_at"},
+    "sales_order_lines": {"id", "sales_order_id", "item_id", "quantity", "unit_price", "amount", "unit_cost"},
+    "payments": {"id", "farm_id", "payment_no", "direction", "business_date", "amount", "method", "customer_id", "sales_order_id", "notes", "created_by_id", "created_at"},
+    "sales_returns": {"id", "farm_id", "return_no", "sales_order_id", "return_date", "status", "total_amount", "created_by_id", "created_at"},
+    "sales_return_lines": {"id", "sales_return_id", "sales_order_line_id", "quantity", "amount", "unit_cost"},
+    "farm_tasks": {"id", "farm_id", "task_no", "title", "due_date", "status", "notes", "created_by_id", "completed_by_id", "completed_at", "created_at"},
+    "audit_logs": {"id", "farm_id", "actor_id", "action", "resource_type", "resource_id", "detail", "created_at"},
+    "attachments": {"id", "farm_id", "resource_type", "resource_id", "original_name", "stored_name", "mime_type", "size_bytes", "sha256", "created_by_id", "created_at"},
 }
 
 
@@ -133,31 +184,42 @@ def create_app(test_config=None):
 
     from .modules.auth import models as _auth_models  # noqa: F401
     from .modules.catalog import models as _catalog_models  # noqa: F401
+    from .modules.crop import models as _crop_models  # noqa: F401
     from .modules.farm import models as _farm_models  # noqa: F401
     from .modules.inventory import models as _inventory_models  # noqa: F401
     from .modules.livestock import models as _livestock_models  # noqa: F401
+    from .modules.trade import models as _trade_models  # noqa: F401
+    from .modules.workflow import models as _workflow_models  # noqa: F401
 
     migrate.init_app(app, db, directory=str(Path(BACKEND_DIR) / "migrations"))
     register_error_handlers(app)
     init_security(app)
 
     from .modules.admin import admin_bp
+    from .modules.agent import agent_bp
     from .modules.analytics import analytics_bp
     from .modules.auth import auth_bp
     from .modules.catalog import catalog_bp
+    from .modules.crop import crop_bp
     from .modules.farm import farm_bp
     from .modules.inventory import inventory_bp
     from .modules.livestock import livestock_bp
+    from .modules.trade import trade_bp
+    from .modules.workflow import workflow_bp
     from .modules.system import system_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
     app.register_blueprint(auth_bp, url_prefix="/api/auth", name_prefix="legacy")
     app.register_blueprint(admin_bp, url_prefix="/api/v1/admin")
+    app.register_blueprint(agent_bp, url_prefix="/api/v1/agent")
     app.register_blueprint(analytics_bp, url_prefix="/api/v1/analytics")
     app.register_blueprint(farm_bp, url_prefix="/api/v1")
     app.register_blueprint(catalog_bp, url_prefix="/api/v1")
+    app.register_blueprint(crop_bp, url_prefix="/api/v1")
     app.register_blueprint(inventory_bp, url_prefix="/api/v1")
     app.register_blueprint(livestock_bp, url_prefix="/api/v1")
+    app.register_blueprint(trade_bp, url_prefix="/api/v1")
+    app.register_blueprint(workflow_bp, url_prefix="/api/v1")
     app.register_blueprint(system_bp)
 
     with app.app_context():
@@ -173,6 +235,24 @@ def create_app(test_config=None):
     def schema_check_command():
         verify_database_schema()
         click.echo("Database schema is ready.")
+
+    @app.cli.command("release-check")
+    def release_check_command():
+        """Validate production configuration and database readiness."""
+        checks = {
+            "mysql": app.config["DATABASE_ENGINE"] == "mysql",
+            "secret_key": len(app.config["SECRET_KEY"]) >= 32,
+            "secure_cookie": bool(app.config["SESSION_COOKIE_SECURE"]),
+            "registration_disabled": not app.config["ALLOW_SELF_REGISTRATION"],
+            "schema_check_enabled": not app.config["SKIP_SCHEMA_CHECK"],
+        }
+        failed = [name for name, passed in checks.items() if not passed]
+        for name, passed in checks.items():
+            click.echo(f"{name}: {'ok' if passed else 'FAIL'}")
+        if failed:
+            raise click.ClickException(f"Release configuration is not ready: {', '.join(failed)}")
+        verify_database_schema()
+        click.echo("Release configuration and database schema are ready.")
 
     @app.cli.command("bootstrap-admin")
     @click.option("--username", default="admin", show_default=True)
@@ -196,6 +276,23 @@ def create_app(test_config=None):
         if discrepancies:
             raise click.ClickException(f"Inventory reconciliation failed: {len(discrepancies)} discrepancy(s).")
         click.echo("Inventory balances match posted stock movements.")
+
+    @app.cli.command("trade-reconcile")
+    @click.option("--farm-id", type=int)
+    def trade_reconcile_command(farm_id):
+        from .modules.trade.service import reconcile_trade
+
+        discrepancies = reconcile_trade(farm_id)
+        if discrepancies:
+            raise click.ClickException(f"Trade reconciliation failed: {len(discrepancies)} discrepancy(s).")
+        click.echo("Sales totals, returns and receipts reconcile.")
+
+    @app.cli.command("seed-agent-demo")
+    def seed_agent_demo_command():
+        from .modules.agent.seed import seed_agent_demo
+
+        farm = seed_agent_demo()
+        click.echo(f"Agent demo data is ready: farmId={farm.id}, code={farm.code}")
 
     return app
 

@@ -203,6 +203,12 @@ test("farm roles collaborate through inventory and pig head-count operations", a
     await logout(displayName, "普通用户");
   }
 
+  function pigBatchRow() {
+    return page.getByRole("row", { name: new RegExp(pigBatchNo) }).filter({
+      has: page.getByRole("button", { name: "查看批次", exact: true }),
+    });
+  }
+
   await page.goto("/login");
   await registerUser(managerUsername, managerName);
   await registerUser(operatorUsername, operatorName);
@@ -344,7 +350,7 @@ test("farm roles collaborate through inventory and pig head-count operations", a
   await pigEntryDialog.getByLabel("生猪来源").fill("本地仔猪供应户");
   await pigEntryDialog.getByRole("button", { name: "确认入栏" }).click();
   await expect(pigEntryDialog).toBeHidden();
-  const managerPigBatchRow = page.getByRole("row", { name: new RegExp(pigBatchNo) });
+  const managerPigBatchRow = pigBatchRow();
   await expect(managerPigBatchRow).toContainText("60");
   await expect(page.getByLabel("生猪存栏汇总")).toContainText("当前存栏60头");
 
@@ -563,7 +569,7 @@ test("farm roles collaborate through inventory and pig head-count operations", a
     toBarnName?: string,
     reason?: string,
   ) {
-    const batchRow = page.getByRole("row", { name: new RegExp(pigBatchNo) });
+    const batchRow = pigBatchRow();
     await batchRow.getByRole("button", { name: "登记变动" }).click();
     const dialog = page.getByRole("dialog", { name: "登记存栏变动" });
     await dialog.getByText(typeName, { exact: true }).click();
@@ -580,15 +586,15 @@ test("farm roles collaborate through inventory and pig head-count operations", a
     await expect(dialog).toBeHidden();
   }
   await recordPigMovement("转舍", pigTransferNo, barnName, "20", secondaryBarnName);
-  await expect(page.getByRole("row", { name: new RegExp(pigBatchNo) })).toContainText("60");
+  await expect(pigBatchRow()).toContainText("60");
   await recordPigMovement("死亡", pigDeathNo, secondaryBarnName, "2", undefined, "应激死亡");
   await recordPigMovement("淘汰", pigCullNo, barnName, "1", undefined, "生长不良");
   await recordPigMovement("出栏", pigExitNo, barnName, "10");
-  const operatorPigBatchRow = page.getByRole("row", { name: new RegExp(pigBatchNo) });
+  const operatorPigBatchRow = pigBatchRow();
   await expect(operatorPigBatchRow).toContainText("47");
   await expect(operatorPigBatchRow).toContainText(`${barnName} 29`);
   await expect(operatorPigBatchRow).toContainText(`${secondaryBarnName} 18`);
-  await expect(page.getByLabel("生猪存栏汇总")).toContainText("累计死亡2头");
+  await expect(page.getByLabel("生猪存栏汇总")).toContainText("累计死亡率3.33% · 2 头");
   await operatorPigBatchRow.getByRole("button", { name: "查看批次" }).click();
   let pigDetailDialog = page.getByRole("dialog", { name: "生猪批次详情" });
   await expect(pigDetailDialog).toContainText("当前存栏47 头");
@@ -694,7 +700,7 @@ test("farm roles collaborate through inventory and pig head-count operations", a
 
   await openNavigationLink("生猪管理");
   await expect(page.getByRole("button", { name: "批次入栏" })).toHaveCount(0);
-  const viewerPigBatchRow = page.getByRole("row", { name: new RegExp(pigBatchNo) });
+  const viewerPigBatchRow = pigBatchRow();
   await expect(viewerPigBatchRow).toContainText("47");
   await expect(viewerPigBatchRow).toContainText(`${barnName} 29`);
   await expect(viewerPigBatchRow).toContainText(`${secondaryBarnName} 18`);

@@ -109,14 +109,23 @@ class PurchaseInventoryTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         return response.get_json()["data"]["category"]
 
-    def create_item(self, farm_id, category_id, unit_id, code, lot_tracking):
+    def create_item(
+        self,
+        farm_id,
+        category_id,
+        unit_id,
+        code,
+        lot_tracking,
+        item_type="feed",
+        name="育肥猪全价料",
+    ):
         response = self.post(self.admin, "/items", {
             "farmId": farm_id,
             "categoryId": category_id,
             "unitId": unit_id,
             "code": code,
-            "name": "育肥猪全价料",
-            "itemType": "feed",
+            "name": name,
+            "itemType": item_type,
             "safetyStock": 5,
             "lotTracking": lot_tracking,
         })
@@ -464,6 +473,512 @@ class PurchaseInventoryTestCase(unittest.TestCase):
         self.assertEqual({item["quantityDelta"] for item in ledger["items"]}, {"-6", "2"})
         self.assertTrue(all(item["costObjectType"] == "BARN" for item in ledger["items"]))
         self.assertTrue(all(item["costObjectId"] == self.barn["id"] for item in ledger["items"]))
+        with self.app.app_context():
+            self.assertEqual(reconcile_inventory(self.farm["id"]), [])
+
+    def test_crop_cycle_production_issue_validates_scope_status_dates_and_is_idempotent(self):
+        catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
+        crop_type = next(item for item in catalogs["cropTypes"] if item["code"] == "TOBACCO")
+        variety = crop_type["varieties"][0] if crop_type["varieties"] else self.post(self.admin, "/crop-varieties", {
+            "cropTypeId": crop_type["id"], "code": "CROP-STOCK-V", "name": "投入品测试品种",
+        }).get_json()["data"]["variety"]
+        plot = self.post(self.admin, "/plots", {
+            "farmId": self.farm["id"], "code": "CROP-STOCK-01", "name": "投入品测试地块", "areaMu": "80",
+        }).get_json()["data"]["plot"]
+        cycle_payload = {
+            "farmId": self.farm["id"],
+            "cycleCode": "CROP-STOCK-001",
+            "plotId": plot["id"],
+            "cropTypeId": crop_type["id"],
+            "varietyId": variety["id"],
+            "areaMu": "40",
+            "plannedStartDate": "2026-08-01",
+            "plannedEndDate": "2026-08-31",
+        }
+        cycle = self.post(self.admin, "/crop-cycles", cycle_payload).get_json()["data"]["cycle"]
+        purchase = self.post(
+            self.operator,
+            "/purchases",
+            self.purchase_input("PO-CROP-CYCLE", quantity="10"),
+        ).get_json()["data"]["purchase"]
+        self.post(self.operator, f"/purchases/{purchase['id']}/post", {"version": purchase["version"]})
+
+        planned = self.production_operation_input("CROP-PLANNED", quantity="1", cost_object_type="crop_cycle")
+        planned["costObjectId"] = cycle["id"]
+        planned["operationDate"] = "2026-08-15"
+        response = self.post(self.operator, "/production-stock-operations", planned)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "CROP_CYCLE_NOT_ACTIVE")
+
+        active = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {
+            "status": "ACTIVE", "actualStartDate": "2026-08-01",
+        })
+        self.assertEqual(active.status_code, 200)
+        before = dict(planned, documentNo="CROP-BEFORE", operationDate="2026-07-31")
+        response = self.post(self.operator, "/production-stock-operations", before)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "PRODUCTION_DATE_BEFORE_CROP_CYCLE")
+        after = dict(planned, documentNo="CROP-AFTER", operationDate="2026-09-03")
+        response = self.post(self.operator, "/production-stock-operations", after)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "PRODUCTION_DATE_AFTER_CROP_CYCLE")
+
+        created = dict(planned, documentNo="CROP-ISSUE-001")
+        response = self.post(self.operator, "/production-stock-operations", created)
+        self.assertEqual(response.status_code, 201)
+        operation = response.get_json()["data"]["operation"]
+        self.assertEqual(operation["costObjectType"], "crop_cycle")
+        self.assertEqual(operation["costObjectId"], cycle["id"])
+        repeated = self.post(self.operator, "/production-stock-operations", created)
+        self.assertEqual(repeated.status_code, 200)
+
+        second_issue = dict(planned, documentNo="CROP-ISSUE-002", quantity="2")
+        second_response = self.post(self.operator, "/production-stock-operations", second_issue)
+        self.assertEqual(second_response.status_code, 201)
+        field_operation_response = self.post(self.manager, "/field-operations", {
+            "farmId": self.farm["id"],
+            "cropCycleId": cycle["id"],
+            "operationType": "FERTILIZATION",
+            "operationDate": "2026-08-15",
+            "areaMu": "40",
+            "laborCost": "100",
+            "serviceCost": "20",
+            "notes": "追肥",
+        })
+        self.assertEqual(field_operation_response.status_code, 201)
+        field_operation = field_operation_response.get_json()["data"]["operation"]
+        available = self.viewer.get("/api/v1/field-operation-inputs/available", query_string={
+            "farmId": self.farm["id"], "fieldOperationId": field_operation["id"],
+        })
+        self.assertEqual(available.status_code, 200)
+        available_documents = available.get_json()["data"]["items"]
+        self.assertEqual({item["documentNo"] for item in available_documents}, {"CROP-ISSUE-001", "CROP-ISSUE-002"})
+        for item in available_documents:
+            payload = {
+                "farmId": self.farm["id"],
+                "fieldOperationId": field_operation["id"],
+                "stockDocumentId": item["stockDocumentId"],
+            }
+            denied = self.post(self.viewer, "/field-operation-inputs", payload)
+            self.assertEqual(denied.status_code, 403)
+            bound = self.post(self.operator, "/field-operation-inputs", payload)
+            self.assertEqual(bound.status_code, 201)
+            repeated_bound = self.post(self.operator, "/field-operation-inputs", payload)
+            self.assertEqual(repeated_bound.status_code, 200)
+        inputs = self.viewer.get("/api/v1/field-operation-inputs", query_string={
+            "farmId": self.farm["id"], "fieldOperationId": field_operation["id"],
+        })
+        self.assertEqual(inputs.status_code, 200)
+        input_data = inputs.get_json()["data"]
+        self.assertEqual(input_data["total"], 2)
+        self.assertEqual({item["quantity"] for item in input_data["items"]}, {"1", "2"})
+        self.assertEqual({item["amount"] for item in input_data["items"]}, {"12.35", "24.69"})
+        cost_summary = self.viewer.get(f"/api/v1/crop-cycles/{cycle['id']}/cost-summary")
+        self.assertEqual(cost_summary.status_code, 200)
+        costs = cost_summary.get_json()["data"]
+        self.assertEqual(costs["materialCost"], "37.04")
+        self.assertEqual(costs["laborCost"], "100.00")
+        self.assertEqual(costs["serviceCost"], "20.00")
+        self.assertEqual(costs["totalCost"], "157.04")
+        self.assertEqual(costs["costPerMu"], "3.93")
+        second_operation = self.post(self.manager, "/field-operations", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "operationType": "IRRIGATION",
+            "operationDate": "2026-08-15", "areaMu": "40",
+        }).get_json()["data"]["operation"]
+        duplicate_binding = self.post(self.operator, "/field-operation-inputs", {
+            "farmId": self.farm["id"],
+            "fieldOperationId": second_operation["id"],
+            "stockDocumentId": available_documents[0]["stockDocumentId"],
+        })
+        self.assertEqual(duplicate_binding.status_code, 409)
+        self.assertEqual(duplicate_binding.get_json()["code"], "FIELD_INPUT_DOCUMENT_BOUND")
+
+        other_farm = self.create_farm("PURCHASE-CROP-02", "其他种植农场")
+        other_plot = self.post(self.admin, "/plots", {
+            "farmId": other_farm["id"], "code": "OTHER-CROP-01", "name": "其他农场地块", "areaMu": "20",
+        }).get_json()["data"]["plot"]
+        other_cycle_payload = dict(cycle_payload, farmId=other_farm["id"], cycleCode="OTHER-CROP-001", plotId=other_plot["id"], areaMu="10")
+        other_cycle_response = self.post(self.admin, "/crop-cycles", other_cycle_payload)
+        self.assertEqual(other_cycle_response.status_code, 201, other_cycle_response.get_json())
+        other_cycle = other_cycle_response.get_json()["data"]["cycle"]
+        cross = dict(created, documentNo="CROP-CROSS", costObjectId=other_cycle["id"])
+        response = self.post(self.operator, "/production-stock-operations", cross)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "COST_OBJECT_FARM_MISMATCH")
+
+        harvesting = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {"status": "HARVESTING"})
+        self.assertEqual(harvesting.status_code, 200)
+        kg_unit = next(item for item in catalogs["units"] if item["code"] == "KG")
+        harvest = self.post(self.manager, "/harvest-batches", {
+            "farmId": self.farm["id"], "cropCycleId": cycle["id"], "harvestNo": "CROP-STOCK-HARVEST",
+            "harvestDate": "2026-08-31", "grossWeight": "1", "netWeight": "1",
+            "unitId": kg_unit["id"], "warehouseId": self.warehouse["id"],
+        })
+        self.assertEqual(harvest.status_code, 201)
+        closed = self.patch(self.admin, f"/crop-cycles/{cycle['id']}/status", {
+            "status": "CLOSED", "actualStartDate": "2026-08-01", "actualEndDate": "2026-08-31",
+        })
+        self.assertEqual(closed.status_code, 200)
+        response = self.post(self.operator, "/production-stock-operations", dict(created, documentNo="CROP-CLOSED"))
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "CROP_CYCLE_CLOSED")
+
+    def test_feed_issue_can_be_traced_to_livestock_batch(self):
+        catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
+        pig_species_id = next(item["id"] for item in catalogs["livestockSpecies"] if item["code"] == "PIG")
+        entry_date = date.today() - timedelta(days=3)
+        batch_response = self.post(self.manager, "/livestock-batches", {
+            "farmId": self.farm["id"],
+            "speciesId": pig_species_id,
+            "batchNo": "PIG-FEED-001",
+            "name": "饲喂成本测试批次",
+            "entryNo": "PIG-ENTRY-001",
+            "entryDate": entry_date.isoformat(),
+            "barnId": self.barn["id"],
+            "initialCount": 20,
+        })
+        self.assertEqual(batch_response.status_code, 201)
+        batch = batch_response.get_json()["data"]["batch"]
+
+        purchase = self.post(
+            self.operator,
+            "/purchases",
+            self.purchase_input("PO-BATCH-FEED", quantity="10"),
+        ).get_json()["data"]["purchase"]
+        self.post(self.operator, f"/purchases/{purchase['id']}/post", {"version": purchase["version"]})
+        issue = self.production_operation_input("FEED-BATCH-001", cost_object_type="livestock_batch")
+        issue["operationDate"] = date.today().isoformat()
+        issue["costObjectId"] = batch["id"]
+        created = self.post(self.operator, "/production-stock-operations", issue)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["data"]["operation"]["costObjectType"], "livestock_batch")
+
+        veterinary_category = self.create_category(self.farm["id"], "VETERINARY")
+        veterinary_item = self.create_item(
+            self.farm["id"],
+            veterinary_category["id"],
+            self.item["unitId"],
+            "PIG-MEDICINE",
+            False,
+            "veterinary_drug",
+            "批次防疫药品",
+        )
+        medicine_purchase_input = self.purchase_input(
+            "PO-BATCH-MEDICINE", quantity="2", unit_price="5", lot_no="LOT-MEDICINE"
+        )
+        medicine_purchase_input["lines"][0]["itemId"] = veterinary_item["id"]
+        medicine_purchase = self.post(
+            self.operator,
+            "/purchases",
+            medicine_purchase_input,
+        ).get_json()["data"]["purchase"]
+        self.post(
+            self.operator,
+            f"/purchases/{medicine_purchase['id']}/post",
+            {"version": medicine_purchase["version"]},
+        )
+        medicine_issue = self.production_operation_input(
+            "MEDICINE-BATCH-001", quantity="1", lot_no="LOT-MEDICINE", cost_object_type="livestock_batch"
+        )
+        medicine_issue["operationDate"] = date.today().isoformat()
+        medicine_issue["costObjectId"] = batch["id"]
+        medicine_issue["itemId"] = veterinary_item["id"]
+        self.assertEqual(
+            self.post(self.operator, "/production-stock-operations", medicine_issue).status_code,
+            201,
+        )
+
+        for record_no, occurred_on, average_weight in (
+            ("WEIGHT-FEED-001", entry_date, "20.000"),
+            ("WEIGHT-FEED-002", date.today(), "22.000"),
+        ):
+            response = self.post(self.operator, "/livestock-weight-records", {
+                "farmId": self.farm["id"],
+                "batchId": batch["id"],
+                "recordNo": record_no,
+                "occurredOn": occurred_on.isoformat(),
+                "sampleCount": 10,
+                "averageWeight": average_weight,
+            })
+            self.assertEqual(response.status_code, 201)
+
+        detail = self.viewer.get(f"/api/v1/livestock-batches/{batch['id']}")
+        self.assertEqual(detail.status_code, 200)
+        data = detail.get_json()["data"]["batch"]
+        self.assertEqual(data["feedingRecords"][0]["documentNo"], "FEED-BATCH-001")
+        self.assertEqual(
+            {record["documentNo"] for record in data["materialRecords"]},
+            {"FEED-BATCH-001", "MEDICINE-BATCH-001"},
+        )
+        self.assertEqual(data["productionSummary"]["totalFeedCost"], "74.07")
+        self.assertEqual(data["productionSummary"]["totalDirectCost"], "79.07")
+        self.assertEqual(data["productionSummary"]["costPerHead"], "3.95")
+        self.assertEqual(data["productionSummary"]["costPerHeadBasis"], "CURRENT_ESTIMATE")
+        self.assertEqual(
+            {item["category"]: item["amount"] for item in data["productionSummary"]["costBreakdown"]},
+            {"feed": "74.07", "veterinary_drug": "5.00"},
+        )
+        self.assertEqual(data["productionSummary"]["totalFeedWeightKg"], "6.000")
+        self.assertEqual(data["productionSummary"]["estimatedWeightGainKg"], "40.000")
+        self.assertEqual(data["productionSummary"]["fcr"], "0.150")
+        self.assertTrue(data["productionSummary"]["fcrEstimated"])
+        self.assertEqual(data["productionTrend"][0]["headCount"], 20)
+        self.assertEqual(data["productionTrend"][0]["averageWeight"], "20")
+        self.assertEqual(data["productionTrend"][-1]["averageWeight"], "22")
+        self.assertEqual(data["productionTrend"][-1]["cumulativeDirectCost"], "79.07")
+        analysis = self.viewer.get(
+            "/api/v1/livestock-analysis",
+            query_string={"farmId": self.farm["id"]},
+        ).get_json()["data"]
+        comparison = next(item for item in analysis["batchComparisons"] if item["batchId"] == batch["id"])
+        self.assertEqual(comparison["directCost"], "79.07")
+        self.assertEqual(comparison["costPerHead"], "3.95")
+        self.assertEqual(comparison["adg"], "0.667")
+        self.assertEqual(comparison["fcr"], "0.150")
+        with self.app.app_context():
+            self.assertEqual(reconcile_inventory(self.farm["id"]), [])
+
+    def test_complete_livestock_batch_reconciles_stock_head_count_costs_and_sources(self):
+        catalogs = self.admin.get("/api/v1/catalogs").get_json()["data"]
+        pig_species_id = next(item["id"] for item in catalogs["livestockSpecies"] if item["code"] == "PIG")
+        unit_id = next(item["id"] for item in catalogs["units"] if item["code"] == "KG")
+        second_barn = self.create_barn(self.farm["id"], "PIG-BARN-2", "育肥二舍")
+        entry_date = date.today() - timedelta(days=14)
+
+        feed_purchase_input = self.purchase_input(
+            "SIM-PO-FEED",
+            quantity="1000",
+            unit_price="2.5",
+            lot_no="SIM-FEED-LOT",
+        )
+        feed_purchase_input["orderDate"] = (entry_date - timedelta(days=1)).isoformat()
+        feed_purchase = self.post(self.operator, "/purchases", feed_purchase_input).get_json()["data"]["purchase"]
+        self.assertEqual(
+            self.post(
+                self.operator,
+                f"/purchases/{feed_purchase['id']}/post",
+                {"version": feed_purchase["version"]},
+            ).status_code,
+            200,
+        )
+
+        medicine_category = self.create_category(self.farm["id"], "SIM-VETERINARY")
+        medicine_item = self.create_item(
+            self.farm["id"],
+            medicine_category["id"],
+            unit_id,
+            "SIM-MEDICINE",
+            False,
+            "veterinary_drug",
+            "模拟防疫药品",
+        )
+        medicine_purchase_input = self.purchase_input(
+            "SIM-PO-MEDICINE",
+            quantity="10",
+            unit_price="40",
+            lot_no=None,
+            expires_on=None,
+        )
+        medicine_purchase_input["orderDate"] = (entry_date - timedelta(days=1)).isoformat()
+        medicine_purchase_input["lines"][0]["itemId"] = medicine_item["id"]
+        medicine_purchase = self.post(
+            self.operator,
+            "/purchases",
+            medicine_purchase_input,
+        ).get_json()["data"]["purchase"]
+        self.assertEqual(
+            self.post(
+                self.operator,
+                f"/purchases/{medicine_purchase['id']}/post",
+                {"version": medicine_purchase["version"]},
+            ).status_code,
+            200,
+        )
+
+        batch_response = self.post(self.manager, "/livestock-batches", {
+            "farmId": self.farm["id"],
+            "speciesId": pig_species_id,
+            "batchNo": "SIM-PIG-001",
+            "name": "完整闭环模拟批次",
+            "entryNo": "SIM-ENTRY-001",
+            "entryDate": entry_date.isoformat(),
+            "barnId": self.barn["id"],
+            "initialCount": 100,
+            "source": "模拟仔猪供应户",
+        })
+        self.assertEqual(batch_response.status_code, 201)
+        batch = batch_response.get_json()["data"]["batch"]
+
+        def production(document_no, operation_type, operation_date, quantity, item_id, lot_no):
+            payload = self.production_operation_input(
+                document_no,
+                operation_type=operation_type,
+                quantity=quantity,
+                lot_no=lot_no,
+                cost_object_type="livestock_batch",
+            )
+            payload.update({
+                "operationDate": operation_date.isoformat(),
+                "costObjectId": batch["id"],
+                "itemId": item_id,
+            })
+            response = self.post(self.operator, "/production-stock-operations", payload)
+            self.assertEqual(response.status_code, 201)
+
+        production("SIM-FEED-ISSUE-1", "issue", entry_date + timedelta(days=1), "200", self.item["id"], "SIM-FEED-LOT")
+        production("SIM-MEDICINE-ISSUE", "issue", entry_date + timedelta(days=2), "2", medicine_item["id"], None)
+
+        self.assertEqual(self.post(self.operator, "/livestock-health-records", {
+            "farmId": self.farm["id"],
+            "batchId": batch["id"],
+            "recordNo": "SIM-HEALTH-001",
+            "recordType": "VACCINATION",
+            "occurredOn": (entry_date + timedelta(days=2)).isoformat(),
+            "description": "完成入栏防疫",
+            "medicineName": "模拟防疫药品",
+            "dosage": "每头按方案使用",
+        }).status_code, 201)
+
+        for index, (offset, weight) in enumerate(((0, "20"), (7, "24.9"), (12, "28.4")), start=1):
+            self.assertEqual(self.post(self.operator, "/livestock-weight-records", {
+                "farmId": self.farm["id"],
+                "batchId": batch["id"],
+                "recordNo": f"SIM-WEIGHT-{index}",
+                "occurredOn": (entry_date + timedelta(days=offset)).isoformat(),
+                "sampleCount": 20,
+                "averageWeight": weight,
+            }).status_code, 201)
+
+        def movement(movement_no, movement_type, occurred_on, from_barn_id, quantity, **extra):
+            response = self.post(self.operator, "/livestock-movements", {
+                "farmId": self.farm["id"],
+                "batchId": batch["id"],
+                "movementNo": movement_no,
+                "movementType": movement_type,
+                "occurredOn": occurred_on.isoformat(),
+                "fromBarnId": from_barn_id,
+                "quantity": quantity,
+                **extra,
+            })
+            self.assertEqual(response.status_code, 201)
+            return response.get_json()["data"]["batch"]
+
+        movement(
+            "SIM-TRANSFER-001",
+            "TRANSFER",
+            entry_date + timedelta(days=8),
+            self.barn["id"],
+            40,
+            toBarnId=second_barn["id"],
+        )
+        movement(
+            "SIM-DEATH-001",
+            "DEATH",
+            entry_date + timedelta(days=9),
+            second_barn["id"],
+            2,
+            reason="应激反应",
+        )
+        production("SIM-FEED-ISSUE-2", "issue", entry_date + timedelta(days=10), "100", self.item["id"], "SIM-FEED-LOT")
+        production("SIM-FEED-RETURN", "return", entry_date + timedelta(days=11), "20", self.item["id"], "SIM-FEED-LOT")
+        movement("SIM-EXIT-001", "EXIT", entry_date + timedelta(days=13), self.barn["id"], 60)
+        closed = movement("SIM-EXIT-002", "EXIT", date.today(), second_barn["id"], 38)
+        self.assertEqual(closed["status"], "CLOSED")
+        self.assertEqual(closed["currentHeadCount"], 0)
+
+        cost_entries = []
+        for entry_no, offset, cost_type, amount, description in (
+            ("SIM-COST-ENTRY", 0, "ENTRY", "20000", "仔猪入栏采购成本"),
+            ("SIM-COST-LABOR", 7, "LABOR", "1200", "本批次饲养人工"),
+            ("SIM-COST-OVERHEAD", 12, "OVERHEAD", "300", "水电公共费用分摊"),
+            ("SIM-COST-OTHER", 13, "OTHER", "100", "待撤销模拟费用"),
+        ):
+            response = self.post(self.manager, "/livestock-cost-entries", {
+                "farmId": self.farm["id"],
+                "batchId": batch["id"],
+                "entryNo": entry_no,
+                "businessDate": (entry_date + timedelta(days=offset)).isoformat(),
+                "costType": cost_type,
+                "amount": amount,
+                "description": description,
+            })
+            self.assertEqual(response.status_code, 201)
+            cost_entries.append(response.get_json()["data"]["costEntry"])
+        self.assertEqual(
+            self.post(
+                self.manager,
+                f"/livestock-cost-entries/{cost_entries[-1]['id']}/cancel",
+            ).status_code,
+            200,
+        )
+
+        detail = self.viewer.get(f"/api/v1/livestock-batches/{batch['id']}").get_json()["data"]["batch"]
+        self.assertEqual(detail["initialCount"], 100)
+        self.assertEqual(detail["deathCount"], 2)
+        self.assertEqual(detail["exitCount"], 98)
+        self.assertEqual(detail["movementCount"], 5)
+        self.assertEqual(len(detail["healthRecords"]), 1)
+        self.assertEqual(len(detail["weightRecords"]), 3)
+        self.assertEqual(
+            {record["documentNo"] for record in detail["materialRecords"]},
+            {"SIM-FEED-ISSUE-1", "SIM-FEED-ISSUE-2", "SIM-FEED-RETURN", "SIM-MEDICINE-ISSUE"},
+        )
+        self.assertEqual(detail["productionSummary"]["totalFeedWeightKg"], "280.000")
+        self.assertEqual(detail["productionSummary"]["totalDirectCost"], "780.00")
+        self.assertEqual(detail["productionSummary"]["costPerHead"], "7.96")
+        self.assertEqual(detail["productionSummary"]["costPerHeadBasis"], "EXITED")
+        self.assertEqual(detail["productionSummary"]["totalAdditionalCost"], "21500.00")
+        self.assertEqual(detail["productionSummary"]["totalProductionCost"], "22280.00")
+        self.assertEqual(detail["productionSummary"]["productionCostPerHead"], "227.35")
+        self.assertEqual(
+            {item["costType"]: item["amount"] for item in detail["productionSummary"]["additionalCostBreakdown"]},
+            {"ENTRY": "20000.00", "LABOR": "1200.00", "OVERHEAD": "300.00"},
+        )
+        self.assertEqual(len(detail["costEntries"]), 4)
+        self.assertEqual(sum(item["status"] == "CANCELLED" for item in detail["costEntries"]), 1)
+        self.assertEqual(detail["productionSummary"]["adg"], "0.700")
+        self.assertEqual(detail["productionSummary"]["fcr"], "0.340")
+        self.assertTrue(detail["productionSummary"]["fcrEstimated"])
+        self.assertEqual(detail["productionTrend"][-1]["headCount"], 0)
+        self.assertEqual(detail["productionTrend"][-1]["cumulativeDirectCost"], "780.00")
+
+        stocks = self.viewer.get(
+            "/api/v1/stocks",
+            query_string={"farmId": self.farm["id"], "pageSize": 100},
+        ).get_json()["data"]
+        stock_by_code = {item["itemCode"]: item for item in stocks["items"]}
+        self.assertEqual(stock_by_code["PIG-FEED"]["quantity"], "720")
+        self.assertEqual(stock_by_code["SIM-MEDICINE"]["quantity"], "8")
+        self.assertEqual(stocks["summary"]["totalValue"], "2120.00")
+
+        analysis = self.viewer.get(
+            "/api/v1/livestock-analysis",
+            query_string={"farmId": self.farm["id"], "trendDays": 30},
+        ).get_json()["data"]
+        self.assertEqual(analysis["summary"]["currentHeadCount"], 0)
+        self.assertEqual(analysis["summary"]["activeBatchCount"], 0)
+        self.assertEqual(analysis["summary"]["mortalityRate"], "2.00")
+        comparison = next(item for item in analysis["batchComparisons"] if item["batchId"] == batch["id"])
+        self.assertEqual(comparison["directCost"], "780.00")
+        self.assertEqual(comparison["costPerHead"], "7.96")
+        self.assertEqual(comparison["productionCost"], "22280.00")
+        self.assertEqual(comparison["productionCostPerHead"], "227.35")
+        self.assertEqual(comparison["fcr"], "0.340")
+
+        rejected = self.production_operation_input(
+            "SIM-AFTER-CLOSE",
+            quantity="1",
+            lot_no="SIM-FEED-LOT",
+            cost_object_type="livestock_batch",
+        )
+        rejected.update({
+            "operationDate": date.today().isoformat(),
+            "costObjectId": batch["id"],
+        })
+        self.assertEqual(
+            self.post(self.operator, "/production-stock-operations", rejected).status_code,
+            409,
+        )
         with self.app.app_context():
             self.assertEqual(reconcile_inventory(self.farm["id"]), [])
 

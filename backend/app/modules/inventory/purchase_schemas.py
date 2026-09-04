@@ -206,7 +206,7 @@ class CreateProductionStockOperationPayload(BaseModel):
     item_id: StrictInt = Field(alias="itemId", gt=0)
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
     lot_no: StrictStr | None = Field(default=None, alias="lotNo", max_length=64)
-    cost_object_type: Literal["farm", "barn", "plot"] = Field(alias="costObjectType")
+    cost_object_type: Literal["farm", "barn", "plot", "livestock_batch", "crop_cycle"] = Field(alias="costObjectType")
     cost_object_id: StrictInt | None = Field(default=None, alias="costObjectId", gt=0)
 
     @field_validator("document_no")
