@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0021_sales_returns"
+REQUIRED_SCHEMA_REVISION = "0022_workflow_audit"
 
 
 REQUIRED_SCHEMA = {
@@ -149,6 +149,8 @@ REQUIRED_SCHEMA = {
     "payments": {"id", "farm_id", "payment_no", "direction", "business_date", "amount", "method", "customer_id", "sales_order_id", "notes", "created_by_id", "created_at"},
     "sales_returns": {"id", "farm_id", "return_no", "sales_order_id", "return_date", "status", "total_amount", "created_by_id", "created_at"},
     "sales_return_lines": {"id", "sales_return_id", "sales_order_line_id", "quantity", "amount", "unit_cost"},
+    "farm_tasks": {"id", "farm_id", "task_no", "title", "due_date", "status", "notes", "created_by_id", "completed_by_id", "completed_at", "created_at"},
+    "audit_logs": {"id", "farm_id", "actor_id", "action", "resource_type", "resource_id", "detail", "created_at"},
 }
 
 
@@ -186,6 +188,7 @@ def create_app(test_config=None):
     from .modules.inventory import models as _inventory_models  # noqa: F401
     from .modules.livestock import models as _livestock_models  # noqa: F401
     from .modules.trade import models as _trade_models  # noqa: F401
+    from .modules.workflow import models as _workflow_models  # noqa: F401
 
     migrate.init_app(app, db, directory=str(Path(BACKEND_DIR) / "migrations"))
     register_error_handlers(app)
@@ -201,6 +204,7 @@ def create_app(test_config=None):
     from .modules.inventory import inventory_bp
     from .modules.livestock import livestock_bp
     from .modules.trade import trade_bp
+    from .modules.workflow import workflow_bp
     from .modules.system import system_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
@@ -214,6 +218,7 @@ def create_app(test_config=None):
     app.register_blueprint(inventory_bp, url_prefix="/api/v1")
     app.register_blueprint(livestock_bp, url_prefix="/api/v1")
     app.register_blueprint(trade_bp, url_prefix="/api/v1")
+    app.register_blueprint(workflow_bp, url_prefix="/api/v1")
     app.register_blueprint(system_bp)
 
     with app.app_context():
