@@ -90,6 +90,14 @@ class TradeTestCase(unittest.TestCase):
         ).get_json()["data"]["order"]
         posted = self.post(f"/sales-orders/{order['id']}/post", {})
         self.assertEqual(posted.status_code, 200)
+        detail = self.client.get(f"/api/v1/sales-orders/{order['id']}").get_json()["data"]["order"]
+        self.assertEqual(detail["lines"][0]["unitCost"], "2.0000")
+        returned = self.post("/sales-returns", {"farmId": self.farm["id"], "returnNo": "SR-01", "salesOrderId": order["id"], "returnDate": date.today().isoformat(), "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 5} ]})
+        self.assertEqual(returned.status_code, 201)
+        duplicate = self.post("/sales-returns", {"farmId": self.farm["id"], "returnNo": "SR-01", "salesOrderId": order["id"], "returnDate": date.today().isoformat(), "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 5} ]})
+        self.assertEqual(duplicate.status_code, 200)
+        over = self.post("/sales-returns", {"farmId": self.farm["id"], "returnNo": "SR-02", "salesOrderId": order["id"], "returnDate": date.today().isoformat(), "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 20} ]})
+        self.assertEqual(over.get_json()["code"], "SALES_RETURN_EXCEEDS_SOLD")
         payment = self.post(
             "/payments",
             {

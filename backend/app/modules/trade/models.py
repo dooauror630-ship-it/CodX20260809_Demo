@@ -111,3 +111,28 @@ class Payment(db.Model):
         USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
+
+
+class SalesReturn(db.Model):
+    __tablename__ = "sales_returns"
+    __table_args__ = (UniqueConstraint("farm_id", "return_no", name="uq_sales_returns_farm_no"),)
+    id: Mapped[int] = mapped_column(USER_ID_TYPE, primary_key=True, autoincrement=True)
+    farm_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("farms.id", ondelete="RESTRICT"), nullable=False)
+    return_no: Mapped[str] = mapped_column(String(30), nullable=False)
+    sales_order_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("sales_orders.id", ondelete="RESTRICT"), nullable=False)
+    return_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="POSTED", server_default="POSTED", nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0, server_default="0", nullable=False)
+    created_by_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
+
+
+class SalesReturnLine(db.Model):
+    __tablename__ = "sales_return_lines"
+    __table_args__ = (UniqueConstraint("sales_return_id", "sales_order_line_id", name="uq_sales_return_lines_line"),)
+    id: Mapped[int] = mapped_column(USER_ID_TYPE, primary_key=True, autoincrement=True)
+    sales_return_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("sales_returns.id", ondelete="CASCADE"), nullable=False)
+    sales_order_line_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("sales_order_lines.id", ondelete="RESTRICT"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(16, 4), nullable=False)

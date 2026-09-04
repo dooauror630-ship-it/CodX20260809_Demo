@@ -8,6 +8,7 @@ from .schemas import (
     CreateSalesOrderPayload,
     SalesListQuery,
     CreatePaymentPayload,
+    CreateSalesReturnPayload,
 )
 from .service import (
     create_customer,
@@ -17,6 +18,8 @@ from .service import (
     list_sales_orders,
     post_sales_order,
     trade_summary,
+    sales_order_detail,
+    create_sales_return,
 )
 
 trade_bp = Blueprint("trade", __name__)
@@ -73,6 +76,20 @@ def payments():
         parse_payload(CreatePaymentPayload, request.get_json(silent=True), "收款信息格式错误"), g.current_user
     )
     return success_response({"payment": payment}, "收款已登记" if created else "该收款已存在", 201 if created else 200)
+
+
+@trade_bp.get("/sales-orders/<int:order_id>")
+@login_required
+def sales_order_detail_route(order_id):
+    return success_response({"order": sales_order_detail(order_id, g.current_user)})
+
+
+@trade_bp.post("/sales-returns")
+@login_required
+def sales_returns():
+    payload = parse_payload(CreateSalesReturnPayload, request.get_json(silent=True), "销售退货信息格式错误")
+    result, created = create_sales_return(payload, g.current_user)
+    return success_response({"return": result}, "销售退货已登记" if created else "该退货单已存在", 201 if created else 200)
 
 
 @trade_bp.get("/trade-summary")

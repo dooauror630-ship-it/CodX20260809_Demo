@@ -79,3 +79,23 @@ class CreatePaymentPayload(BaseModel):
     @classmethod
     def normalize_no(cls, value):
         return value.upper()
+
+
+class SalesReturnLinePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    sales_order_line_id: StrictInt = Field(alias="salesOrderLineId", gt=0)
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
+
+
+class CreateSalesReturnPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    farm_id: StrictInt = Field(alias="farmId", gt=0)
+    return_no: StrictStr = Field(alias="returnNo", min_length=3, max_length=30, pattern=r"^[A-Za-z0-9_-]+$")
+    sales_order_id: StrictInt = Field(alias="salesOrderId", gt=0)
+    return_date: date = Field(alias="returnDate")
+    lines: list[SalesReturnLinePayload] = Field(min_length=1, max_length=100)
+
+    @field_validator("return_no")
+    @classmethod
+    def normalize_no(cls, value):
+        return value.upper()

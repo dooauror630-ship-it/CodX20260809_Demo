@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0020_trade_sales"
+REQUIRED_SCHEMA_REVISION = "0021_sales_returns"
 
 
 REQUIRED_SCHEMA = {
@@ -147,6 +147,8 @@ REQUIRED_SCHEMA = {
     "sales_orders": {"id", "farm_id", "order_no", "customer_id", "warehouse_id", "sale_date", "status", "total_amount", "received_amount", "notes", "posted_at", "posted_by_id", "created_by_id", "created_at"},
     "sales_order_lines": {"id", "sales_order_id", "item_id", "quantity", "unit_price", "amount", "unit_cost"},
     "payments": {"id", "farm_id", "payment_no", "direction", "business_date", "amount", "method", "customer_id", "sales_order_id", "notes", "created_by_id", "created_at"},
+    "sales_returns": {"id", "farm_id", "return_no", "sales_order_id", "return_date", "status", "total_amount", "created_by_id", "created_at"},
+    "sales_return_lines": {"id", "sales_return_id", "sales_order_line_id", "quantity", "amount", "unit_cost"},
 }
 
 
