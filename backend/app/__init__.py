@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0022_workflow_audit"
+REQUIRED_SCHEMA_REVISION = "0023_attachments"
 
 
 REQUIRED_SCHEMA = {
@@ -151,6 +151,7 @@ REQUIRED_SCHEMA = {
     "sales_return_lines": {"id", "sales_return_id", "sales_order_line_id", "quantity", "amount", "unit_cost"},
     "farm_tasks": {"id", "farm_id", "task_no", "title", "due_date", "status", "notes", "created_by_id", "completed_by_id", "completed_at", "created_at"},
     "audit_logs": {"id", "farm_id", "actor_id", "action", "resource_type", "resource_id", "detail", "created_at"},
+    "attachments": {"id", "farm_id", "resource_type", "resource_id", "original_name", "stored_name", "mime_type", "size_bytes", "sha256", "created_by_id", "created_at"},
 }
 
 

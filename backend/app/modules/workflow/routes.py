@@ -4,6 +4,7 @@ from ...core.security import login_required
 from ..auth.schemas import parse_payload
 from .schemas import CreateTaskPayload, TaskListQuery
 from .service import create_task, complete_task, list_audits, list_tasks
+from .attachments import download_attachment, list_attachments, save_attachment
 
 workflow_bp = Blueprint("workflow", __name__)
 
@@ -24,3 +25,18 @@ def finish_task(task_id): return success_response({"task": complete_task(task_id
 @workflow_bp.get("/audit-logs")
 @login_required
 def audits(): return success_response(list_audits(request.args.get("farmId", type=int), g.current_user))
+
+@workflow_bp.post("/attachments")
+@login_required
+def upload_attachment():
+    item = save_attachment(request.files.get("file"), request.form.get("farmId", type=int), request.form.get("resourceType", "GENERAL"), request.form.get("resourceId", type=int), g.current_user)
+    return success_response({"attachment": item}, "附件已上传", 201)
+
+@workflow_bp.get("/attachments")
+@login_required
+def attachments():
+    return success_response(list_attachments(request.args.get("farmId", type=int), request.args.get("resourceType", "GENERAL"), request.args.get("resourceId", type=int), g.current_user))
+
+@workflow_bp.get("/attachments/<int:attachment_id>/download")
+@login_required
+def attachment_download(attachment_id): return download_attachment(attachment_id, g.current_user)

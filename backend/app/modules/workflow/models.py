@@ -32,3 +32,19 @@ class AuditLog(db.Model):
     resource_id: Mapped[int | None] = mapped_column(USER_ID_TYPE, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
+
+
+class Attachment(db.Model):
+    __tablename__ = "attachments"
+    __table_args__ = (Index("ix_attachments_resource", "farm_id", "resource_type", "resource_id"),)
+    id: Mapped[int] = mapped_column(USER_ID_TYPE, primary_key=True, autoincrement=True)
+    farm_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("farms.id", ondelete="RESTRICT"), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    resource_id: Mapped[int | None] = mapped_column(USER_ID_TYPE, nullable=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_id: Mapped[int] = mapped_column(USER_ID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
