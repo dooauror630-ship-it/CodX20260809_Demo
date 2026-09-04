@@ -277,6 +277,16 @@ def create_app(test_config=None):
             raise click.ClickException(f"Inventory reconciliation failed: {len(discrepancies)} discrepancy(s).")
         click.echo("Inventory balances match posted stock movements.")
 
+    @app.cli.command("trade-reconcile")
+    @click.option("--farm-id", type=int)
+    def trade_reconcile_command(farm_id):
+        from .modules.trade.service import reconcile_trade
+
+        discrepancies = reconcile_trade(farm_id)
+        if discrepancies:
+            raise click.ClickException(f"Trade reconciliation failed: {len(discrepancies)} discrepancy(s).")
+        click.echo("Sales totals, returns and receipts reconcile.")
+
     @app.cli.command("seed-agent-demo")
     def seed_agent_demo_command():
         from .modules.agent.seed import seed_agent_demo

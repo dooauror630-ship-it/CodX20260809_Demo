@@ -5,6 +5,7 @@ from pathlib import Path
 
 from backend.app import create_app, db
 from backend.app.modules.auth.service import ensure_admin_user
+from backend.app.modules.trade.service import reconcile_trade
 
 
 class TradeTestCase(unittest.TestCase):
@@ -115,6 +116,8 @@ class TradeTestCase(unittest.TestCase):
         self.assertEqual(
             summary, {"postedSalesAmount": "75.00", "salesCost": "30.00", "grossProfit": "45.00", "receivedAmount": "75.00", "cashNetInflow": "75.00", "receivableAmount": "0.00"}
         )
+        with self.app.app_context():
+            self.assertEqual(reconcile_trade(self.farm["id"]), [])
         insufficient = self.post(
             "/sales-orders",
             {

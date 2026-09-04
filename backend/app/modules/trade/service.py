@@ -355,3 +355,17 @@ def trade_profit(farm_id, actor):
         returned_cost = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.quantity * SalesReturnLine.unit_cost), 0)).join(SalesReturn).join(SalesOrderLine, SalesOrderLine.id == SalesReturnLine.sales_order_line_id).where(SalesReturn.sales_order_id == order.id, SalesReturn.status == "POSTED")) or 0)
         result.append({"orderId": order.id, "orderNo": order.order_no, "saleDate": order.sale_date.isoformat(), "revenue": f"{revenue - returned_revenue:.2f}", "cost": f"{cost - returned_cost:.2f}", "grossProfit": f"{revenue - returned_revenue - cost + returned_cost:.2f}", "receivedAmount": f"{Decimal(order.received_amount or 0):.2f}"})
     return result
+
+
+def reconcile_trade(farm_id=None):
+    conditions = [] if farm_id is None else [SalesOrder.farm_id == farm_id]
+    discrepancies = []
+    orders = db.session.scalars(select(SalesOrder).where(*conditions)).all()
+    for order in orders:
+        line_total = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesOrderLine.amount), 0)).where(SalesOrderLine.sales_order_id == order.id)) or 0)
+        returned_total = Decimal(db.session.scalar(select(func.coalesce(func.sum(SalesReturnLine.amount), 0)).join(SalesReturn).where(SalesReturn.sales_order_id == order.id, SalesReturn.status == "POSTED")) or 0)
+        if _money(line_total) != _money(order.total_amount):
+            discrepancies.append({"orderId": order.id, "code": "SALES_TOTAL_MISMATCH"})
+        if Decimal(order.received_amount or 0) > Decimal(order.total_amount or 0) - returned_total:
+            discrepancies.append({"orderId": order.id, "code": "SALES_RECEIVED_EXCEEDS_NET"})
+    return discrepancies
