@@ -236,6 +236,24 @@ def create_app(test_config=None):
         verify_database_schema()
         click.echo("Database schema is ready.")
 
+    @app.cli.command("release-check")
+    def release_check_command():
+        """Validate production configuration and database readiness."""
+        checks = {
+            "mysql": app.config["DATABASE_ENGINE"] == "mysql",
+            "secret_key": len(app.config["SECRET_KEY"]) >= 32,
+            "secure_cookie": bool(app.config["SESSION_COOKIE_SECURE"]),
+            "registration_disabled": not app.config["ALLOW_SELF_REGISTRATION"],
+            "schema_check_enabled": not app.config["SKIP_SCHEMA_CHECK"],
+        }
+        failed = [name for name, passed in checks.items() if not passed]
+        for name, passed in checks.items():
+            click.echo(f"{name}: {'ok' if passed else 'FAIL'}")
+        if failed:
+            raise click.ClickException(f"Release configuration is not ready: {', '.join(failed)}")
+        verify_database_schema()
+        click.echo("Release configuration and database schema are ready.")
+
     @app.cli.command("bootstrap-admin")
     @click.option("--username", default="admin", show_default=True)
     @click.option("--display-name", default="系统管理员", show_default=True)
