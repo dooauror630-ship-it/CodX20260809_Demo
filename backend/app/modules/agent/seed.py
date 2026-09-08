@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -7,7 +7,14 @@ from ...extensions import db
 from ..auth.models import User
 from ..catalog.models import LivestockSpecies, Unit
 from ..farm.models import Barn, Farm
-from ..inventory.models import InventoryBalance, Item, ItemCategory, Warehouse
+from ..inventory.models import (
+    InventoryBalance,
+    Item,
+    ItemCategory,
+    StockDocument,
+    StockMovementLine,
+    Warehouse,
+)
 from ..livestock.models import (
     LivestockBatch,
     LivestockHealthRecord,
@@ -74,6 +81,7 @@ def seed_agent_demo():
     if unit is None or pig_species is None:
         raise RuntimeError("Default KG unit and PIG species are required.")
 
+    today = date.today()
     item_specs = (
         ("DEMO-CORN", "测试玉米饲料", "500", "120", "2.50"),
         ("DEMO-VACCINE", "测试疫苗", "30", "10", "18.00"),
@@ -106,12 +114,40 @@ def seed_agent_demo():
             )
         )
         if balance is None:
-            db.session.add(InventoryBalance(
+            balance = InventoryBalance(
                 farm_id=farm.id,
                 warehouse_id=warehouse.id,
                 item_id=item.id,
                 quantity=Decimal(quantity),
                 average_cost=Decimal(average_cost),
+            )
+            db.session.add(balance)
+
+        opening_document = db.session.scalar(
+            select(StockDocument).where(
+                StockDocument.farm_id == farm.id,
+                StockDocument.document_no == f"DEMO-OPEN-{code}",
+            )
+        )
+        if opening_document is None:
+            opening_document = StockDocument(
+                farm_id=farm.id,
+                document_no=f"DEMO-OPEN-{code}",
+                document_type="OPENING_BALANCE",
+                to_warehouse_id=warehouse.id,
+                status="POSTED",
+                source_type="AGENT_DEMO",
+                occurred_at=datetime.combine(today, time.min),
+                created_by_id=actor.id,
+            )
+            db.session.add(opening_document)
+            db.session.flush()
+            db.session.add(StockMovementLine(
+                stock_document_id=opening_document.id,
+                warehouse_id=warehouse.id,
+                item_id=item.id,
+                quantity_delta=balance.quantity or Decimal("0"),
+                unit_cost=balance.average_cost or Decimal("0"),
             ))
 
     barn = db.session.scalar(
@@ -131,7 +167,6 @@ def seed_agent_demo():
         db.session.add(barn)
         db.session.flush()
 
-    today = date.today()
     batch = db.session.scalar(
         select(LivestockBatch).where(
             LivestockBatch.farm_id == farm.id,

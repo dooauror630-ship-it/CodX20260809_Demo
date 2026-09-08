@@ -7,6 +7,7 @@ from backend.app.modules.agent.seed import seed_agent_demo
 from backend.app.modules.agent.service import inventory_summary, livestock_summary
 from backend.app.modules.auth.service import ensure_admin_user
 from backend.app.modules.farm.models import Farm
+from backend.app.modules.inventory.purchase_service import reconcile_inventory
 
 
 class AgentApiTestCase(unittest.TestCase):
@@ -82,6 +83,7 @@ class AgentApiTestCase(unittest.TestCase):
             inventory = inventory_summary(first.id)
             self.assertEqual(inventory["summary"]["stockItemCount"], 3)
             self.assertEqual(inventory["summary"]["lowStockCount"], 2)
+            self.assertEqual(reconcile_inventory(first.id), [])
 
             livestock = livestock_summary(first.id)
             self.assertEqual(livestock["summary"]["currentHeadCount"], 84)
