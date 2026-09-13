@@ -98,6 +98,7 @@ def seed_agent_demo():
     role_accounts = (
         ("agent_operator", "TestV1操作员", "operator", "TestV1-Operator-123!", "operator"),
         ("agent_manager", "TestV1负责人", "operator", "TestV1-Manager-123!", "manager"),
+        ("agent_viewer", "TestV3查看员", "operator", "TestV3-Viewer-123!", "viewer"),
     )
     for username, display_name, role, password, farm_role in role_accounts:
         account = db.session.scalar(select(User).where(User.username == username))
