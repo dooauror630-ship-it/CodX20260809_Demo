@@ -40,6 +40,7 @@ function persistMessages() {
     savedAt: Date.now(),
     messages: messages.value,
   }));
+  window.dispatchEvent(new Event("agri-assistant-sync"));
 }
 
 function restoreMessages() {
@@ -219,6 +220,7 @@ function formatChatTime(value?: string) {
 onMounted(() => {
   restoreMessages();
   restoreBehavior();
+  window.addEventListener("agri-assistant-sync", restoreMessages);
   void startSession();
 });
 </script>

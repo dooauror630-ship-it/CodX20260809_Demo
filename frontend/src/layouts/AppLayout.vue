@@ -23,6 +23,7 @@ import { errorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useFarmStore } from "@/stores/farm";
 import { useAssistantTaskStore } from "@/stores/assistantTask";
+import AssistantFloating from "@/modules/assistant/AssistantFloating.vue";
 
 
 const route = useRoute();
@@ -243,6 +244,7 @@ onMounted(() => void loadFarmContext());
         <span class="assistant-task-float-dot" />
         <div><strong>智能体后台任务</strong><span>{{ assistantTask.text }}</span><small>{{ assistantTask.progress }}</small></div>
       </aside>
+      <AssistantFloating />
     </section>
   </div>
 </template>
