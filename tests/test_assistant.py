@@ -148,6 +148,7 @@ class AssistantSecurityTestCase(unittest.TestCase):
             "agri_purchase_options",
             "agri_inventory_summary",
             "agri_livestock_summary",
+            "agri_trade_summary",
             "agri_inventory_count_detail",
         ])
         self.assertFalse(data["writePolicy"]["enabled"])

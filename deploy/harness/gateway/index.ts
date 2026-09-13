@@ -309,7 +309,7 @@ async function proxyTool(request: IncomingMessage, response: ServerResponse, url
   const entry = toolSession(request);
   const method = request.method ?? "GET";
   const toolPath = url.pathname.slice("/v1/tools/".length);
-  if (!["farms", "current-user", "users", "purchase-options", "purchase-draft", "purchase-confirm", "inventory-counts", "inventory-count-detail", "inventory-count-draft", "inventory-count-update", "inventory-count-confirm", "stock-transfer-draft", "stock-transfer-confirm", "inventory-summary", "livestock-summary"].includes(toolPath)) {
+  if (!["farms", "current-user", "users", "purchase-options", "purchase-draft", "purchase-confirm", "inventory-counts", "inventory-count-detail", "inventory-count-draft", "inventory-count-update", "inventory-count-confirm", "stock-transfer-draft", "stock-transfer-confirm", "inventory-summary", "livestock-summary", "trade-summary"].includes(toolPath)) {
     throw new GatewayError(404, "TOOL_NOT_FOUND", "智能体工具不存在");
   }
   entry.lastUsedAt = Date.now();

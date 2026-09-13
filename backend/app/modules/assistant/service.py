@@ -38,6 +38,7 @@ from ..inventory.purchase_service import (
     post_purchase,
     purchase_detail,
 )
+from ..trade.service import trade_summary
 from ..workflow.models import AuditLog
 from .models import AgentConfirmationNonce
 
@@ -87,6 +88,13 @@ TOOL_CATALOG = (
     {
         "name": "agri_livestock_summary",
         "label": "查询养殖概览",
+        "mode": "read",
+        "minRole": "viewer",
+        "status": "enabled",
+    },
+    {
+        "name": "agri_trade_summary",
+        "label": "查询销售经营汇总",
         "mode": "read",
         "minRole": "viewer",
         "status": "enabled",
@@ -700,3 +708,7 @@ def internal_inventory_summary(farm_id, user):
 
 def internal_livestock_summary(farm_id, user):
     return livestock_summary(farm_id, actor=user)
+
+
+def internal_trade_summary(farm_id, user):
+    return {"farmId": farm_id, "summary": trade_summary(farm_id, user)}
