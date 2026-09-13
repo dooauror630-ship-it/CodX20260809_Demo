@@ -38,7 +38,7 @@ from ..inventory.purchase_service import (
     post_purchase,
     purchase_detail,
 )
-from ..trade.service import trade_summary
+from ..trade.service import trade_profit, trade_summary
 from ..crop.schemas import CropFarmAnalysisQuery
 from ..crop.service import crop_farm_analysis
 from ..workflow.models import AuditLog
@@ -104,6 +104,13 @@ TOOL_CATALOG = (
     {
         "name": "agri_crop_summary",
         "label": "查询种植经营分析",
+        "mode": "read",
+        "minRole": "viewer",
+        "status": "enabled",
+    },
+    {
+        "name": "agri_trade_profit",
+        "label": "查询销售单利润明细",
         "mode": "read",
         "minRole": "viewer",
         "status": "enabled",
@@ -725,3 +732,7 @@ def internal_trade_summary(farm_id, user):
 
 def internal_crop_summary(farm_id, user):
     return crop_farm_analysis(CropFarmAnalysisQuery(farmId=farm_id), user)
+
+
+def internal_trade_profit(farm_id, user):
+    return {"farmId": farm_id, "items": trade_profit(farm_id, user)}
