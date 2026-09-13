@@ -15,6 +15,7 @@ from .service import (
     internal_inventory_summary,
     internal_livestock_summary,
     internal_trade_summary,
+    internal_crop_summary,
     internal_purchase_draft,
     internal_purchase_confirm,
     internal_purchase_options,
@@ -159,3 +160,9 @@ def livestock():
 @agent_session_required
 def trade():
     return success_response(internal_trade_summary(_farm_id(), g.agent_user))
+
+
+@assistant_bp.get("/internal/crop-summary")
+@agent_session_required
+def crop():
+    return success_response(internal_crop_summary(_farm_id(), g.agent_user))
