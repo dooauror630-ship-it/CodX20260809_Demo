@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from backend.app import create_app, db
 from backend.app.modules.auth.service import ensure_admin_user
+from backend.app.modules.workflow.models import Attachment
 
 class AttachmentTestCase(unittest.TestCase):
     def test_upload_list_download_and_reject_extension(self):
@@ -16,10 +17,25 @@ class AttachmentTestCase(unittest.TestCase):
                 return {"X-CSRF-Token": client.get("/api/v1/auth/csrf").get_json()["csrfToken"]}
             client.post("/api/v1/auth/login", json={"username": "admin", "password": "123456"}, headers=csrf())
             farm = client.post("/api/v1/farms", json={"code": "AT-01", "name": "附件农场", "ownerName": "负责人"}, headers=csrf()).get_json()["data"]["farm"]
+            mismatched_resource = client.post(
+                "/api/v1/attachments",
+                data={"farmId": str(farm["id"]), "resourceType": "FARM", "resourceId": "999999", "file": (io.BytesIO(b"x"), "note.txt")},
+                headers=csrf(),
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(mismatched_resource.status_code, 409)
+            self.assertEqual(mismatched_resource.get_json()["code"], "ATTACHMENT_RESOURCE_MISMATCH")
             response = client.post("/api/v1/attachments", data={"farmId": str(farm["id"]), "resourceType": "FARM", "resourceId": str(farm["id"]), "file": (io.BytesIO(b"hello"), "note.txt")}, headers=csrf(), content_type="multipart/form-data")
             self.assertEqual(response.status_code, 201)
             attachment_id = response.get_json()["data"]["attachment"]["id"]
             self.assertEqual(client.get(f"/api/v1/attachments/{attachment_id}/download").data, b"hello")
+            with app.app_context():
+                attachment = db.session.get(Attachment, attachment_id)
+                attachment.stored_name = "..\\outside.txt"
+                db.session.commit()
+            blocked = client.get(f"/api/v1/attachments/{attachment_id}/download")
+            self.assertEqual(blocked.status_code, 400)
+            self.assertEqual(blocked.get_json()["code"], "ATTACHMENT_PATH_INVALID")
             bad = client.post("/api/v1/attachments", data={"farmId": str(farm["id"]), "file": (io.BytesIO(b"x"), "bad.exe")}, headers=csrf(), content_type="multipart/form-data")
             self.assertEqual(bad.get_json()["code"], "ATTACHMENT_TYPE_INVALID")
             with app.app_context():

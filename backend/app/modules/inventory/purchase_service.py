@@ -139,7 +139,9 @@ def update_supplier(supplier_id, payload, actor):
 
 
 def _active_supplier(farm_id, supplier_id):
-    supplier = db.session.get(Supplier, supplier_id)
+    supplier = db.session.scalar(
+        select(Supplier).where(Supplier.id == supplier_id).with_for_update()
+    )
     if supplier is None:
         raise ApiError("供应商不存在", 404, "SUPPLIER_NOT_FOUND")
     if supplier.farm_id != farm_id:
@@ -150,7 +152,9 @@ def _active_supplier(farm_id, supplier_id):
 
 
 def _active_warehouse(farm_id, warehouse_id):
-    warehouse = db.session.get(Warehouse, warehouse_id)
+    warehouse = db.session.scalar(
+        select(Warehouse).where(Warehouse.id == warehouse_id).with_for_update()
+    )
     if warehouse is None:
         raise ApiError("仓库不存在", 404, "WAREHOUSE_NOT_FOUND")
     if warehouse.farm_id != farm_id:
@@ -364,6 +368,9 @@ def create_purchase(payload, actor):
 def update_purchase(purchase_id, payload, actor):
     order = _purchase_row(purchase_id, lock=True)
     _require_write_access(order.farm_id, actor)
+    _farm, access_role = get_accessible_farm(order.farm_id, actor)
+    if actor.role != "admin" and access_role != "manager" and order.created_by_id != actor.id:
+        raise ApiError("只能修改自己创建的采购草稿", 403, "PURCHASE_DRAFT_OWNER_REQUIRED")
     if payload.farm_id != order.farm_id:
         raise ApiError("不能将采购单转移到其他农场", 409, "PURCHASE_FARM_MISMATCH")
     if order.status != "DRAFT":
@@ -631,7 +638,11 @@ def create_purchase_return(payload, actor):
             )
 
     inventory_unit_cost = Decimal(balance.average_cost or 0)
-    balance.quantity = current_quantity - payload.quantity
+    new_quantity = current_quantity - payload.quantity
+    if new_quantity < 0:
+        # 防御性检查：行锁后再次确认，禁止任何路径写入负库存。
+        raise ApiError("库存不足，请刷新后重试", 409, "STOCK_INSUFFICIENT", "quantity")
+    balance.quantity = new_quantity
     if balance.quantity == 0:
         balance.average_cost = Decimal("0")
     document = StockDocument(
@@ -709,6 +720,8 @@ def _stock_transfer_payload(document):
         "lotNo": movement.lot_no,
         "expiresOn": movement.expires_on.isoformat() if movement.expires_on else None,
         "createdAt": format_datetime(document.created_at),
+        "status": document.status,
+        "version": document.version,
     }
 
 
@@ -741,7 +754,9 @@ def _existing_stock_transfer(payload):
 
 
 def _active_stock_item(farm_id, item_id, action):
-    item = db.session.get(Item, item_id)
+    item = db.session.scalar(
+        select(Item).where(Item.id == item_id).with_for_update()
+    )
     if item is None:
         raise ApiError("物料不存在", 404, "ITEM_NOT_FOUND")
     if item.farm_id != farm_id:
@@ -837,7 +852,11 @@ def create_stock_transfer(payload, actor):
         ((destination_quantity * destination_cost) + (payload.quantity * source_cost))
         / new_destination_quantity
     ).quantize(COST_STEP, rounding=ROUND_HALF_UP)
-    source_balance.quantity = source_quantity - payload.quantity
+    new_source_quantity = source_quantity - payload.quantity
+    if new_source_quantity < 0:
+        # 防御性检查：即使上游校验通过，也不允许调拨形成负库存。
+        raise ApiError("库存不足，请刷新后重试", 409, "STOCK_INSUFFICIENT", "quantity")
+    source_balance.quantity = new_source_quantity
 
     document = StockDocument(
         farm_id=payload.farm_id,
@@ -1082,7 +1101,10 @@ def create_production_stock_operation(payload, actor):
                     {"available": _number_text(lot_quantity)},
                 )
         unit_cost = Decimal(balance.average_cost or 0)
-        balance.quantity = current_quantity - payload.quantity
+        new_quantity = current_quantity - payload.quantity
+        if new_quantity < 0:
+            raise ApiError("库存不足，请刷新后重试", 409, "STOCK_INSUFFICIENT", "quantity")
+        balance.quantity = new_quantity
         quantity_delta = -payload.quantity
         document_type = "PRODUCTION_ISSUE"
     else:

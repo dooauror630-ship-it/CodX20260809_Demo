@@ -27,6 +27,8 @@ from .purchase_service import (
     _paginated,
     _require_write_access,
 )
+from ..workflow.models import AuditLog
+import json
 
 
 def _adjustment_document(count_id):
@@ -381,6 +383,14 @@ def post_inventory_count(count_id, payload, actor):
         count.posted_at = datetime.now()
         count.posted_by_id = actor.id
         count.updated_by_id = actor.id
+        db.session.add(AuditLog(
+            farm_id=count.farm_id,
+            actor_id=actor.id,
+            action="POST",
+            resource_type="INVENTORY_COUNT",
+            resource_id=count.id,
+            detail=json.dumps({"countNo": count.count_no}, ensure_ascii=False),
+        ))
         db.session.commit()
     except IntegrityError as error:
         db.session.rollback()

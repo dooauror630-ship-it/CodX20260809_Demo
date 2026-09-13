@@ -36,6 +36,10 @@ def init_security(app):
 
         if request.method in SAFE_METHODS or not request.path.startswith("/api/"):
             return None
+        # Internal assistant routes authenticate with a short-lived signed
+        # agent token; browser session writes remain CSRF-protected.
+        if request.path.startswith("/api/v1/assistant/internal/") and request.headers.get("Authorization", "").startswith("Bearer "):
+            return None
         supplied = request.headers.get("X-CSRF-Token", "")
         expected = session.get("csrf_token", "")
         if not supplied or not expected or not secrets.compare_digest(supplied, expected):

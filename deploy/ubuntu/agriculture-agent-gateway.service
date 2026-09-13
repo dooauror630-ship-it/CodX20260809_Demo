@@ -1,0 +1,31 @@
+[Unit]
+Description=Agriculture Harness Agent Gateway
+After=network-online.target agriculture-management.service
+Wants=network-online.target
+ConditionPathExists=/opt/deepseek-harness/packages/sdk/client/src/index.ts
+
+[Service]
+Type=simple
+User=agriculture
+Group=agriculture
+WorkingDirectory=/opt/agriculture-management/app
+EnvironmentFile=/etc/agriculture-management/app.env
+EnvironmentFile=-/etc/agriculture-management/harness.env
+Environment=NODE_ENV=production
+ExecStart=/opt/deepseek-harness/node_modules/.bin/tsx /opt/agriculture-management/app/deploy/harness/gateway/index.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/agriculture-management/harness
+
+[Install]
+WantedBy=multi-user.target

@@ -239,7 +239,11 @@ def sales_order_detail(order_id, actor):
 
 def create_sales_return(payload, actor):
     _require_write_access(payload.farm_id, actor)
-    order = db.session.get(SalesOrder, payload.sales_order_id)
+    if payload.return_date > datetime.now().date():
+        raise ApiError("退货日期不能晚于今天", 400, "SALES_RETURN_DATE_IN_FUTURE", "returnDate")
+    order = db.session.scalar(
+        select(SalesOrder).where(SalesOrder.id == payload.sales_order_id).with_for_update()
+    )
     if not order or order.farm_id != payload.farm_id:
         raise ApiError("销售单不属于当前农场", 409, "SALES_ORDER_FARM_MISMATCH")
     if order.status != "POSTED":
@@ -247,33 +251,42 @@ def create_sales_return(payload, actor):
     existing = db.session.scalar(select(SalesReturn).where(SalesReturn.farm_id == payload.farm_id, SalesReturn.return_no == payload.return_no))
     if existing:
         return {"id": existing.id, "returnNo": existing.return_no, "salesOrderId": existing.sales_order_id, "totalAmount": f"{existing.total_amount:.2f}", "status": existing.status}, False
-    lines = {line.id: line for line in db.session.scalars(select(SalesOrderLine).where(SalesOrderLine.sales_order_id == order.id)).all()}
+    lines = {
+        line.id: line
+        for line in db.session.scalars(
+            select(SalesOrderLine).where(SalesOrderLine.sales_order_id == order.id).with_for_update()
+        ).all()
+    }
     returned = {line_id: Decimal(qty or 0) for line_id, qty in db.session.execute(select(SalesReturnLine.sales_order_line_id, func.sum(SalesReturnLine.quantity)).join(SalesReturn).where(SalesReturnLine.sales_order_line_id.in_(lines), SalesReturn.status == "POSTED").group_by(SalesReturnLine.sales_order_line_id)).all()}
     total = Decimal("0")
+    requested_by_line = {}
     for requested in payload.lines:
         line = lines.get(requested.sales_order_line_id)
         if not line:
             raise ApiError("退货明细不属于该销售单", 409, "SALES_LINE_MISMATCH")
-        if returned.get(line.id, 0) + requested.quantity > line.quantity:
+        requested_by_line[line.id] = requested_by_line.get(line.id, Decimal("0")) + requested.quantity
+    for line_id, requested_quantity in requested_by_line.items():
+        line = lines[line_id]
+        if returned.get(line_id, Decimal("0")) + requested_quantity > line.quantity:
             raise ApiError("退货数量超过已销售数量", 409, "SALES_RETURN_EXCEEDS_SOLD")
-        total += _money(requested.quantity * line.unit_price)
+        total += _money(requested_quantity * line.unit_price)
     result = SalesReturn(farm_id=order.farm_id, return_no=payload.return_no, sales_order_id=order.id, return_date=payload.return_date, total_amount=total, created_by_id=actor.id)
     db.session.add(result)
     db.session.flush()
     document = StockDocument(farm_id=order.farm_id, document_no=f"SR-{payload.return_no}", document_type="SALES_RETURN", status="POSTED", source_type="SALES_RETURN", source_id=result.id, occurred_at=datetime.combine(payload.return_date, datetime.min.time()), created_by_id=actor.id)
     db.session.add(document)
     db.session.flush()
-    for requested in payload.lines:
-        line = lines[requested.sales_order_line_id]
-        db.session.add(SalesReturnLine(sales_return_id=result.id, sales_order_line_id=line.id, quantity=requested.quantity, amount=_money(requested.quantity * line.unit_price), unit_cost=line.unit_cost))
+    for line_id, requested_quantity in requested_by_line.items():
+        line = lines[line_id]
+        db.session.add(SalesReturnLine(sales_return_id=result.id, sales_order_line_id=line.id, quantity=requested_quantity, amount=_money(requested_quantity * line.unit_price), unit_cost=line.unit_cost))
         balance = db.session.scalar(select(InventoryBalance).where(InventoryBalance.warehouse_id == order.warehouse_id, InventoryBalance.item_id == line.item_id).with_for_update())
         if balance is None:
             balance = InventoryBalance(farm_id=order.farm_id, warehouse_id=order.warehouse_id, item_id=line.item_id, quantity=0, average_cost=line.unit_cost)
             db.session.add(balance)
         old_qty, old_cost = Decimal(balance.quantity or 0), Decimal(balance.average_cost or 0)
-        balance.quantity = old_qty + requested.quantity
-        balance.average_cost = ((old_qty * old_cost + requested.quantity * line.unit_cost) / balance.quantity).quantize(Decimal("0.0001"))
-        db.session.add(StockMovementLine(stock_document_id=document.id, warehouse_id=order.warehouse_id, item_id=line.item_id, quantity_delta=requested.quantity, unit_cost=line.unit_cost))
+        balance.quantity = old_qty + requested_quantity
+        balance.average_cost = ((old_qty * old_cost + requested_quantity * line.unit_cost) / balance.quantity).quantize(Decimal("0.0001"))
+        db.session.add(StockMovementLine(stock_document_id=document.id, warehouse_id=order.warehouse_id, item_id=line.item_id, quantity_delta=requested_quantity, unit_cost=line.unit_cost))
     db.session.commit()
     return {"id": result.id, "returnNo": result.return_no, "salesOrderId": result.sales_order_id, "totalAmount": f"{result.total_amount:.2f}", "status": result.status}, True
 
@@ -281,14 +294,28 @@ def create_sales_return(payload, actor):
 def create_payment(payload, actor):
     _require_write_access(payload.farm_id, actor)
     existing = db.session.scalar(
-        select(Payment).where(Payment.farm_id == payload.farm_id, Payment.payment_no == payload.payment_no)
+        select(Payment)
+        .where(Payment.farm_id == payload.farm_id, Payment.payment_no == payload.payment_no)
+        .with_for_update()
     )
     if existing:
+        if existing.amount != payload.amount or existing.sales_order_id != payload.sales_order_id:
+            raise ApiError("收款单号已存在且内容不同", 409, "PAYMENT_NO_EXISTS", "paymentNo")
         return {"id": existing.id, "paymentNo": existing.payment_no, "amount": f"{existing.amount:.2f}"}, False
+    customer = None
+    if payload.customer_id:
+        customer = db.session.get(Customer, payload.customer_id)
+        if not customer or customer.farm_id != payload.farm_id:
+            raise ApiError("客户不属于当前农场", 409, "CUSTOMER_FARM_MISMATCH")
+    order = None
     if payload.sales_order_id:
-        order = db.session.get(SalesOrder, payload.sales_order_id)
+        order = db.session.scalar(
+            select(SalesOrder).where(SalesOrder.id == payload.sales_order_id).with_for_update()
+        )
         if not order or order.farm_id != payload.farm_id or order.status != "POSTED":
             raise ApiError("收款必须关联已过账销售单", 409, "PAYMENT_ORDER_INVALID")
+        if customer is not None and customer.id != order.customer_id:
+            raise ApiError("收款客户与销售单客户不一致", 409, "PAYMENT_CUSTOMER_MISMATCH")
         if order.received_amount + payload.amount > order.total_amount:
             raise ApiError("收款不能超过销售应收", 409, "PAYMENT_EXCEEDS_RECEIVABLE")
         order.received_amount += payload.amount
@@ -305,7 +332,16 @@ def create_payment(payload, actor):
         created_by_id=actor.id,
     )
     db.session.add(p)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError as error:
+        db.session.rollback()
+        existing = db.session.scalar(
+            select(Payment).where(Payment.farm_id == payload.farm_id, Payment.payment_no == payload.payment_no)
+        )
+        if existing and existing.amount == payload.amount and existing.sales_order_id == payload.sales_order_id:
+            return {"id": existing.id, "paymentNo": existing.payment_no, "amount": f"{existing.amount:.2f}"}, False
+        raise ApiError("收款登记冲突，请刷新后重试", 409, "PAYMENT_CONFLICT") from error
     return {"id": p.id, "paymentNo": p.payment_no, "amount": f"{p.amount:.2f}"}, True
 
 

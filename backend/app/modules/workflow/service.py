@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from ...core.errors import ApiError
 from ...extensions import db
 from ..farm.service import get_accessible_farm
@@ -27,16 +28,26 @@ def create_task(payload, actor):
         return _payload(existing), False
     task = FarmTask(farm_id=payload.farm_id, task_no=payload.task_no, title=payload.title, due_date=payload.due_date, notes=payload.notes, created_by_id=actor.id)
     db.session.add(task)
-    db.session.flush()
-    _audit(payload.farm_id, actor.id, "CREATE", "FARM_TASK", task.id, {"taskNo": task.task_no})
-    db.session.commit()
+    try:
+        db.session.flush()
+        _audit(payload.farm_id, actor.id, "CREATE", "FARM_TASK", task.id, {"taskNo": task.task_no})
+        db.session.commit()
+    except IntegrityError as error:
+        db.session.rollback()
+        existing = db.session.scalar(select(FarmTask).where(FarmTask.farm_id == payload.farm_id, FarmTask.task_no == payload.task_no))
+        if existing:
+            return _payload(existing), False
+        raise ApiError("任务编号已存在", 409, "TASK_NO_EXISTS", "taskNo") from error
     return _payload(task), True
 
 def complete_task(task_id, actor):
-    task = db.session.get(FarmTask, task_id)
+    task = db.session.scalar(select(FarmTask).where(FarmTask.id == task_id).with_for_update())
     if not task:
         raise ApiError("任务不存在", 404, "TASK_NOT_FOUND")
     _require_write_access(task.farm_id, actor)
+    _farm, access_role = get_accessible_farm(task.farm_id, actor)
+    if actor.role != "admin" and access_role != "manager" and task.created_by_id != actor.id:
+        raise ApiError("只能完成自己创建的任务或由农场负责人代办", 403, "TASK_COMPLETION_FORBIDDEN")
     if task.status == "DONE":
         return _payload(task)
     task.status, task.completed_by_id, task.completed_at = "DONE", actor.id, datetime.now()

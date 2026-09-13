@@ -1,7 +1,10 @@
+from datetime import datetime
+
 from flask import Blueprint, current_app, g, jsonify, request, session
 
 from ...core.errors import ApiError
 from ...core.security import csrf_token, login_required
+from ...extensions import db
 from .schemas import LoginPayload, REGISTER_FIELD_MESSAGES, RegisterPayload, parse_payload
 from .service import authenticate_user, register_user, user_payload
 
@@ -62,5 +65,9 @@ def current_user():
 @auth_bp.post("/logout")
 @login_required
 def logout():
+    # Advance the user version so short-lived agent session tokens are revoked
+    # immediately instead of remaining usable until their normal expiry.
+    g.current_user.updated_at = datetime.now()
+    db.session.commit()
     session.clear()
     return auth_response(message="已安全退出")

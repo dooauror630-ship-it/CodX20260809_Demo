@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from backend.app import create_app, db
@@ -99,6 +99,8 @@ class TradeTestCase(unittest.TestCase):
         self.assertEqual(duplicate.status_code, 200)
         over = self.post("/sales-returns", {"farmId": self.farm["id"], "returnNo": "SR-02", "salesOrderId": order["id"], "returnDate": date.today().isoformat(), "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 20} ]})
         self.assertEqual(over.get_json()["code"], "SALES_RETURN_EXCEEDS_SOLD")
+        duplicate_line = self.post("/sales-returns", {"farmId": self.farm["id"], "returnNo": "SR-03", "salesOrderId": order["id"], "returnDate": date.today().isoformat(), "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 8}, {"salesOrderLineId": detail["lines"][0]["id"], "quantity": 8}]})
+        self.assertEqual(duplicate_line.get_json().get("code"), "SALES_RETURN_EXCEEDS_SOLD", duplicate_line.get_json())
         payment = self.post(
             "/payments",
             {
@@ -112,6 +114,43 @@ class TradeTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(payment.status_code, 201)
+        duplicate_payment = self.post(
+            "/payments",
+            {
+                "farmId": self.farm["id"],
+                "paymentNo": "PAY-01",
+                "businessDate": date.today().isoformat(),
+                "amount": 75,
+                "method": "转账",
+                "customerId": customer["id"],
+                "salesOrderId": order["id"],
+            },
+        )
+        self.assertEqual(duplicate_payment.status_code, 200)
+        conflicting_payment = self.post(
+            "/payments",
+            {
+                "farmId": self.farm["id"],
+                "paymentNo": "PAY-01",
+                "businessDate": date.today().isoformat(),
+                "amount": 70,
+                "method": "转账",
+                "customerId": customer["id"],
+                "salesOrderId": order["id"],
+            },
+        )
+        self.assertEqual(conflicting_payment.status_code, 409)
+        future_return = self.post(
+            "/sales-returns",
+            {
+                "farmId": self.farm["id"],
+                "returnNo": "SR-FUTURE",
+                "salesOrderId": order["id"],
+                "returnDate": (date.today() + timedelta(days=1)).isoformat(),
+                "lines": [{"salesOrderLineId": detail["lines"][0]["id"], "quantity": 1}],
+            },
+        )
+        self.assertEqual(future_return.get_json()["code"], "SALES_RETURN_DATE_IN_FUTURE")
         summary = self.client.get("/api/v1/trade-summary", query_string={"farmId": self.farm["id"]}).get_json()["data"]
         self.assertEqual(
             summary, {"postedSalesAmount": "75.00", "salesCost": "30.00", "grossProfit": "45.00", "receivedAmount": "75.00", "cashNetInflow": "75.00", "receivableAmount": "0.00"}

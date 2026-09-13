@@ -2,17 +2,19 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
+from werkzeug.security import generate_password_hash
 
 from ...extensions import db
 from ..auth.models import User
 from ..catalog.models import LivestockSpecies, Unit
-from ..farm.models import Barn, Farm
+from ..farm.models import Barn, Farm, FarmUser
 from ..inventory.models import (
     InventoryBalance,
     Item,
     ItemCategory,
     StockDocument,
     StockMovementLine,
+    Supplier,
     Warehouse,
 )
 from ..livestock.models import (
@@ -60,6 +62,65 @@ def seed_agent_demo():
         )
         db.session.add(warehouse)
         db.session.flush()
+
+    destination_warehouse = db.session.scalar(
+        select(Warehouse).where(Warehouse.farm_id == farm.id, Warehouse.code == "DEMO-WH-TO")
+    )
+    if destination_warehouse is None:
+        destination_warehouse = Warehouse(
+            farm_id=farm.id,
+            code="DEMO-WH-TO",
+            name="智能体调入仓库",
+            location="测试区-调入",
+            is_active=True,
+            created_by_id=actor.id,
+            updated_by_id=actor.id,
+        )
+        db.session.add(destination_warehouse)
+        db.session.flush()
+
+    supplier = db.session.scalar(
+        select(Supplier).where(Supplier.farm_id == farm.id, Supplier.code == "DEMO-SUP")
+    )
+    if supplier is None:
+        supplier = Supplier(
+            farm_id=farm.id,
+            code="DEMO-SUP",
+            name="智能体测试供应商",
+            contact="测试联系人",
+            phone="13800000000",
+            created_by_id=actor.id,
+            updated_by_id=actor.id,
+        )
+        db.session.add(supplier)
+
+    # 角色账号用于验证智能体的读取、草稿和确认权限边界。
+    role_accounts = (
+        ("agent_operator", "TestV1操作员", "operator", "TestV1-Operator-123!", "operator"),
+        ("agent_manager", "TestV1负责人", "operator", "TestV1-Manager-123!", "manager"),
+    )
+    for username, display_name, role, password, farm_role in role_accounts:
+        account = db.session.scalar(select(User).where(User.username == username))
+        if account is None:
+            account = User(
+                username=username,
+                display_name=display_name,
+                password_hash=generate_password_hash(password),
+                role=role,
+                is_active=True,
+            )
+            db.session.add(account)
+            db.session.flush()
+        membership = db.session.scalar(select(FarmUser).where(
+            FarmUser.farm_id == farm.id, FarmUser.user_id == account.id,
+        ))
+        if membership is None:
+            db.session.add(FarmUser(
+                farm_id=farm.id,
+                user_id=account.id,
+                role_code=farm_role,
+                is_active=True,
+            ))
 
     category = db.session.scalar(
         select(ItemCategory).where(ItemCategory.farm_id == farm.id, ItemCategory.code == "DEMO-FEED")
@@ -182,7 +243,7 @@ def seed_agent_demo():
             entry_date=today - timedelta(days=45),
             source="测试供应户",
             status="ACTIVE",
-            notes="仅用于 Dify 接口测试",
+            notes="仅用于 Harness TestV1 测试",
             created_by_id=actor.id,
             updated_by_id=actor.id,
         )
@@ -211,7 +272,7 @@ def seed_agent_demo():
                 quantity=quantity,
                 occurred_on=occurred_on,
                 reason=reason,
-                notes="Dify 测试数据",
+                notes="Harness TestV1 测试数据",
                 created_by_id=actor.id,
             ))
 
@@ -236,7 +297,7 @@ def seed_agent_demo():
                 description=description,
                 medicine_name=medicine,
                 dosage="按测试说明" if medicine else None,
-                notes="Dify 测试数据",
+                notes="Harness TestV1 测试数据",
                 created_by_id=actor.id,
             ))
 
@@ -254,7 +315,7 @@ def seed_agent_demo():
             occurred_on=today - timedelta(days=3),
             sample_count=20,
             average_weight=Decimal("32.5"),
-            notes="Dify 测试数据",
+            notes="Harness TestV1 测试数据",
             created_by_id=actor.id,
         ))
 

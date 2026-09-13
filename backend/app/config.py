@@ -64,6 +64,8 @@ def configure_app(app, test_config=None):
         ALLOW_SELF_REGISTRATION=env_bool("AGRI_ALLOW_SELF_REGISTRATION", True),
         AGENT_API_KEY=os.getenv("AGRI_AGENT_API_KEY", ""),
         AGENT_FARM_CODE=os.getenv("AGRI_AGENT_FARM_CODE", "AGENT-DEMO"),
+        AGENT_SESSION_MAX_AGE=int(os.getenv("AGRI_AGENT_SESSION_MAX_AGE", "300")),
+        AGENT_CONFIRMATION_MAX_AGE=int(os.getenv("AGRI_AGENT_CONFIRMATION_MAX_AGE", "300")),
         SKIP_SCHEMA_CHECK=env_bool("AGRI_SKIP_SCHEMA_CHECK"),
     )
     if test_config:

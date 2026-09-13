@@ -19,6 +19,14 @@ from ..livestock.service import (
 )
 
 
+def _authorized_farm(farm_id, actor=None):
+    if actor is not None:
+        from ..farm.service import get_accessible_farm
+
+        return get_accessible_farm(farm_id, actor)[0]
+    return _active_farm(farm_id)
+
+
 def _active_farm(farm_id):
     farm = db.session.get(Farm, farm_id)
     allowed_code = current_app.config.get("AGENT_FARM_CODE", "")
@@ -51,8 +59,8 @@ def list_farms():
     return {"farms": [_farm_payload(farm) for farm in farms], "count": len(farms)}
 
 
-def inventory_summary(farm_id):
-    farm = _active_farm(farm_id)
+def inventory_summary(farm_id, actor=None):
+    farm = _authorized_farm(farm_id, actor)
     rows = db.session.execute(
         select(InventoryBalance, Item, Unit, Warehouse)
         .join(Item, Item.id == InventoryBalance.item_id)
@@ -78,8 +86,8 @@ def inventory_summary(farm_id):
     }
 
 
-def livestock_summary(farm_id):
-    farm = _active_farm(farm_id)
+def livestock_summary(farm_id, actor=None):
+    farm = _authorized_farm(farm_id, actor)
     rows = db.session.execute(
         select(LivestockBatch, LivestockSpecies)
         .join(LivestockSpecies, LivestockSpecies.id == LivestockBatch.species_id)

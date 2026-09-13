@@ -8,7 +8,16 @@ system_bp = Blueprint("system", __name__)
 
 
 def health_response():
-    db.session.execute(text("SELECT 1"))
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "service": "agriculture-management",
+            "database": "down",
+            "requestId": g.request_id,
+        }), 503
     return jsonify({
         "success": True,
         "service": "agriculture-management",

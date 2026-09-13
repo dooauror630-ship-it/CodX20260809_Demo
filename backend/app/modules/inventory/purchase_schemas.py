@@ -134,6 +134,12 @@ class PurchaseActionPayload(BaseModel):
     version: StrictInt = Field(gt=0)
 
 
+class ConfirmPurchasePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    confirmation_token: StrictStr = Field(alias="confirmationToken", min_length=20, max_length=2048)
+
+
 class CreatePurchaseReturnPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
 

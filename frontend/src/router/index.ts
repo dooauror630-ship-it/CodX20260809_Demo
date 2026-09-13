@@ -29,6 +29,12 @@ export const router = createRouter({
           meta: { title: "工作台" },
         },
         {
+          path: "assistant",
+          name: "assistant",
+          component: () => import("@/modules/assistant/AssistantView.vue"),
+          meta: { title: "智能体工作台" },
+        },
+        {
           path: "base/farms",
           name: "farms",
           component: () => import("@/modules/farm/FarmManagementView.vue"),

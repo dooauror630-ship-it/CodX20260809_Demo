@@ -8,7 +8,7 @@ foreach ($file in Get-ChildItem -LiteralPath $versions -Filter "*.py") {
     $down = [regex]::Match($content, 'down_revision\s*=\s*["'']([^"'']+)["'']').Groups[1].Value
     if ($revision) { $revisions[$revision] = $down }
 }
-$current = "0023_attachments"
+$current = "0025_stock_document_versions"
 $seen = [System.Collections.Generic.HashSet[string]]::new()
 while ($current) {
     if (-not $seen.Add($current)) { throw "Migration cycle detected at $current" }
@@ -16,4 +16,4 @@ while ($current) {
     $current = $revisions[$current]
 }
 if ($seen.Count -ne $revisions.Count) { throw "Migration graph contains an unconnected revision." }
-Write-Host "Migration chain verified: $($seen.Count) revisions, latest 0023_attachments." -ForegroundColor Green
+Write-Host "Migration chain verified: $($seen.Count) revisions, latest 0025_stock_document_versions." -ForegroundColor Green

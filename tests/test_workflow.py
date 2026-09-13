@@ -26,6 +26,37 @@ class WorkflowTestCase(unittest.TestCase):
             self.assertEqual(client.post(f"/api/v1/tasks/{task_id}/complete", json={}, headers=csrf()).status_code, 200)
             audits = client.get("/api/v1/audit-logs", query_string={"farmId": farm["id"]})
             self.assertEqual(len(audits.get_json()["data"]["items"]), 2)
+
+            operator = app.test_client()
+            registered = operator.post(
+                "/api/v1/auth/register",
+                json={"username": "workflow_operator", "password": "Operator123", "displayName": "任务操作员"},
+                headers={"X-CSRF-Token": operator.get("/api/v1/auth/csrf").get_json()["csrfToken"]},
+            )
+            self.assertEqual(registered.status_code, 201)
+            operator_id = registered.get_json()["user"]["id"]
+            self.assertEqual(
+                client.post(
+                    f"/api/v1/farms/{farm['id']}/members",
+                    json={"userId": operator_id, "roleCode": "operator"},
+                    headers=csrf(),
+                ).status_code,
+                201,
+            )
+            operator_csrf = {"X-CSRF-Token": operator.get("/api/v1/auth/csrf").get_json()["csrfToken"]}
+            self.assertEqual(
+                operator.post("/api/v1/auth/login", json={"username": "workflow_operator", "password": "Operator123"}, headers=operator_csrf).status_code,
+                200,
+            )
+            operator_csrf = {"X-CSRF-Token": operator.get("/api/v1/auth/csrf").get_json()["csrfToken"]}
+            protected = client.post(
+                "/api/v1/tasks",
+                json={**payload, "taskNo": "TASK-02"},
+                headers=csrf(),
+            ).get_json()["data"]["task"]
+            forbidden = operator.post(f"/api/v1/tasks/{protected['id']}/complete", json={}, headers=operator_csrf)
+            self.assertEqual(forbidden.status_code, 403)
+            self.assertEqual(forbidden.get_json()["code"], "TASK_COMPLETION_FORBIDDEN")
             with app.app_context():
                 db.session.remove()
                 db.engine.dispose()

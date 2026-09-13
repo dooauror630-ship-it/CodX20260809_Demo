@@ -11,7 +11,7 @@ from .core.security import init_security
 from .extensions import db, migrate
 
 
-REQUIRED_SCHEMA_REVISION = "0023_attachments"
+REQUIRED_SCHEMA_REVISION = "0025_stock_document_versions"
 
 
 REQUIRED_SCHEMA = {
@@ -76,7 +76,7 @@ REQUIRED_SCHEMA = {
     },
     "stock_documents": {
         "id", "farm_id", "document_no", "document_type", "from_warehouse_id", "to_warehouse_id",
-        "status", "source_type", "source_id", "occurred_at", "created_by_id", "created_at",
+        "status", "version", "source_type", "source_id", "occurred_at", "created_by_id", "created_at",
     },
     "stock_movement_lines": {
         "id", "stock_document_id", "warehouse_id", "item_id", "quantity_delta", "unit_cost",
@@ -152,6 +152,7 @@ REQUIRED_SCHEMA = {
     "farm_tasks": {"id", "farm_id", "task_no", "title", "due_date", "status", "notes", "created_by_id", "completed_by_id", "completed_at", "created_at"},
     "audit_logs": {"id", "farm_id", "actor_id", "action", "resource_type", "resource_id", "detail", "created_at"},
     "attachments": {"id", "farm_id", "resource_type", "resource_id", "original_name", "stored_name", "mime_type", "size_bytes", "sha256", "created_by_id", "created_at"},
+    "agent_confirmation_nonces": {"id", "nonce", "user_id", "farm_id", "action", "resource_id", "used_at", "created_at"},
 }
 
 
@@ -190,6 +191,7 @@ def create_app(test_config=None):
     from .modules.livestock import models as _livestock_models  # noqa: F401
     from .modules.trade import models as _trade_models  # noqa: F401
     from .modules.workflow import models as _workflow_models  # noqa: F401
+    from .modules.assistant import models as _assistant_models  # noqa: F401
 
     migrate.init_app(app, db, directory=str(Path(BACKEND_DIR) / "migrations"))
     register_error_handlers(app)
@@ -197,6 +199,7 @@ def create_app(test_config=None):
 
     from .modules.admin import admin_bp
     from .modules.agent import agent_bp
+    from .modules.assistant import assistant_bp
     from .modules.analytics import analytics_bp
     from .modules.auth import auth_bp
     from .modules.catalog import catalog_bp
@@ -212,6 +215,7 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp, url_prefix="/api/auth", name_prefix="legacy")
     app.register_blueprint(admin_bp, url_prefix="/api/v1/admin")
     app.register_blueprint(agent_bp, url_prefix="/api/v1/agent")
+    app.register_blueprint(assistant_bp, url_prefix="/api/v1/assistant")
     app.register_blueprint(analytics_bp, url_prefix="/api/v1/analytics")
     app.register_blueprint(farm_bp, url_prefix="/api/v1")
     app.register_blueprint(catalog_bp, url_prefix="/api/v1")

@@ -242,6 +242,7 @@ class StockDocument(db.Model):
         USER_ID_TYPE, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="POSTED", server_default="POSTED")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_id: Mapped[int | None] = mapped_column(USER_ID_TYPE, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

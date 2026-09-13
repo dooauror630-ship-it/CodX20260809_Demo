@@ -3,7 +3,7 @@
   "info": {
     "title": "综合农牧业管理系统智能体工具",
     "version": "1.0.0",
-    "description": "供 Dify 智能体只读查询 AGENT-DEMO 测试农场、库存预警和生猪养殖概览。"
+    "description": "历史 Dify 只读接口定义，现已由项目内置 Harness 智能体替代，仅保留用于迁移和兼容性参考。"
   },
   "servers": [
     {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Box,
+  ChatDotRound,
   Collection,
   DataAnalysis,
   Food,
@@ -21,12 +22,14 @@ import { useRoute, useRouter } from "vue-router";
 import { errorMessage } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 import { useFarmStore } from "@/stores/farm";
+import { useAssistantTaskStore } from "@/stores/assistantTask";
 
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const farms = useFarmStore();
+const assistantTask = useAssistantTaskStore();
 const mobileMenuOpen = ref(false);
 const loggingOut = ref(false);
 const currentPageTitle = computed(() => String(route.meta.title ?? "工作台"));
@@ -91,6 +94,10 @@ onMounted(() => void loadFarmContext());
         <router-link to="/dashboard" class="sidebar-link">
           <el-icon><DataAnalysis /></el-icon>
           <span>工作台</span>
+        </router-link>
+        <router-link to="/assistant" class="sidebar-link">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>智能体</span>
         </router-link>
         <router-link to="/base/farms" class="sidebar-link">
           <el-icon><OfficeBuilding /></el-icon>
@@ -232,6 +239,10 @@ onMounted(() => void loadFarmContext());
       <main class="app-content">
         <router-view />
       </main>
+      <aside v-if="assistantTask.running" class="assistant-task-float" aria-live="polite">
+        <span class="assistant-task-float-dot" />
+        <div><strong>智能体后台任务</strong><span>{{ assistantTask.text }}</span><small>{{ assistantTask.progress }}</small></div>
+      </aside>
     </section>
   </div>
 </template>

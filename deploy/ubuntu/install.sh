@@ -17,6 +17,7 @@ fi
 
 id agriculture >/dev/null 2>&1 || useradd --system --home "$APP_ROOT" --shell /usr/sbin/nologin agriculture
 install -d -o agriculture -g agriculture -m 0750 "$APP_DIR/backend/instance"
+install -d -o agriculture -g agriculture -m 0750 "$APP_ROOT/harness-state"
 install -d -o root -g agriculture -m 0750 "$ENV_DIR"
 install -d -o root -g root -m 0700 "$BACKUP_DIR"
 
@@ -51,6 +52,20 @@ EOF
     chmod 0640 "$ENV_DIR/app.env"
     chown root:root "$ENV_DIR/migrate.env"
     chmod 0600 "$ENV_DIR/migrate.env"
+fi
+
+if [[ ! -f "$ENV_DIR/harness.env" ]]; then
+    cat >"$ENV_DIR/harness.env" <<EOF
+AGRI_HARNESS_ROOT=/opt/deepseek-harness
+AGRI_HARNESS_WORKSPACE=/opt/deepseek-harness
+AGRI_HARNESS_PATCH=$APP_DIR/deploy/harness/cordis.patch.yml
+AGRI_HARNESS_DSH_HOME=$APP_ROOT/harness-state
+AGRI_BACKEND_BASE_URL=http://127.0.0.1:5000
+AGRI_GATEWAY_HOST=127.0.0.1
+AGRI_GATEWAY_PORT=15100
+EOF
+    chown root:agriculture "$ENV_DIR/harness.env"
+    chmod 0640 "$ENV_DIR/harness.env"
 fi
 
 set -a
@@ -98,6 +113,7 @@ AGRI_BOOTSTRAP_ADMIN_PASSWORD=$(cat /root/agriculture-management-initial-admin-p
 unset AGRI_BOOTSTRAP_ADMIN_PASSWORD
 
 install -o root -g root -m 0644 "$APP_DIR/deploy/ubuntu/agriculture-management.service" /etc/systemd/system/agriculture-management.service
+install -o root -g root -m 0644 "$APP_DIR/deploy/ubuntu/agriculture-agent-gateway.service" /etc/systemd/system/agriculture-agent-gateway.service
 install -o root -g root -m 0644 "$APP_DIR/deploy/ubuntu/nginx.conf" /etc/nginx/sites-available/agriculture-management
 ln -sfn /etc/nginx/sites-available/agriculture-management /etc/nginx/sites-enabled/agriculture-management
 rm -f /etc/nginx/sites-enabled/default
@@ -118,7 +134,7 @@ chown -R root:root "$APP_DIR" "$APP_ROOT/venv"
 chown -R agriculture:agriculture "$APP_DIR/backend/instance"
 nginx -t
 systemctl daemon-reload
-systemctl enable --now mysql nginx agriculture-management
+systemctl enable --now mysql nginx agriculture-management agriculture-agent-gateway
 systemctl reload nginx
 /usr/local/sbin/agriculture-management-backup
 
