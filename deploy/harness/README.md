@@ -10,6 +10,7 @@
 $env:AGRI_HARNESS_ROOT = 'G:/deepseek-harness-master/deepseek-harness-master'
 $env:AGRI_HARNESS_WORKSPACE = 'G:/deepseek-harness-master/deepseek-harness-master'
 $env:AGRI_HARNESS_PATCH = 'D:/zongheguanlixitong/deploy/harness/cordis.patch.yml'
+$env:AGRI_HARNESS_DSH_HOME = 'D:/zongheguanlixitong/.dsh-agri'
 $env:AGRI_BACKEND_BASE_URL = 'http://127.0.0.1:5000'
 pnpm exec tsx 'D:/zongheguanlixitong/deploy/harness/gateway/index.ts'
 ```

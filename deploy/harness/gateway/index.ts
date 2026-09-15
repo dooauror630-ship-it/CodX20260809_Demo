@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
@@ -18,6 +18,9 @@ const backendBaseUrl = (process.env.AGRI_BACKEND_BASE_URL ?? "http://127.0.0.1:5
 const gatewayPublicUrl = (process.env.AGRI_GATEWAY_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/$/u, "");
 const harnessRoot = process.env.AGRI_HARNESS_ROOT;
 const patchPath = process.env.AGRI_HARNESS_PATCH;
+// Keep the embedded agricultural assistant's Harness state separate from the
+// standalone DSH desktop app, which otherwise falls back to the same ~/.dsh.
+const harnessHome = process.env.AGRI_HARNESS_DSH_HOME ?? resolve(process.cwd(), ".dsh-agri");
 const maxSessions = numberEnv("AGRI_GATEWAY_MAX_SESSIONS", 20, 1, 100);
 const idleMs = numberEnv("AGRI_GATEWAY_SESSION_IDLE_MS", 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
 const promptTimeoutMs = numberEnv("AGRI_GATEWAY_PROMPT_TIMEOUT_MS", 5 * 60 * 1000, 10_000, 30 * 60 * 1000);
@@ -223,7 +226,7 @@ async function createHarness(token: string, toolToken: string): Promise<Harness>
   return new Constructor({
     cwd: process.env.AGRI_HARNESS_WORKSPACE ?? process.cwd(),
     dshBin: process.env.AGRI_HARNESS_DSH_BIN,
-    dshHome: process.env.AGRI_HARNESS_DSH_HOME,
+    dshHome: harnessHome,
     patches: [await preparePatchPath()],
     provider: process.env.AGRI_HARNESS_PROVIDER ?? "deepseek-official",
     model: process.env.AGRI_HARNESS_MODEL ?? "deepseek-v4-flash",
