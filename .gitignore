@@ -9,6 +9,7 @@ htmlcov/
 backend/instance/
 backups/
 logs/
+.dsh-agri/
 nginx/logs/*
 !nginx/logs/.gitkeep
 frontend/node_modules/
