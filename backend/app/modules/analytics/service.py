@@ -5,6 +5,12 @@ from sqlalchemy import select
 
 from ...extensions import db
 from ..auth.models import User
+from ..farm.service import get_accessible_farm
+from ..inventory.models import InventoryBalance
+from ..livestock.models import LivestockBatch
+from ..crop.models import CropCycle
+from ..trade.service import trade_summary
+from sqlalchemy import func
 
 
 def recent_months(reference, count=6):
@@ -48,4 +54,16 @@ def system_overview(now=None):
             {"role": role, "count": count} for role, count in sorted(role_counts.items())
         ],
         "generatedAt": now.isoformat(timespec="seconds"),
+    }
+
+
+def farm_overview(farm_id, actor):
+    get_accessible_farm(farm_id, actor)
+    inventory = db.session.execute(select(func.coalesce(func.sum(InventoryBalance.quantity * InventoryBalance.average_cost), 0), func.count(InventoryBalance.id)).where(InventoryBalance.farm_id == farm_id, InventoryBalance.quantity > 0)).one()
+    return {
+        "farmId": farm_id,
+        "inventory": {"stockValue": f"{inventory[0]:.2f}", "activeItemCount": inventory[1]},
+        "livestock": {"activeBatchCount": db.session.scalar(select(func.count(LivestockBatch.id)).where(LivestockBatch.farm_id == farm_id, LivestockBatch.status == "ACTIVE")) or 0},
+        "crops": {"openCycleCount": db.session.scalar(select(func.count(CropCycle.id)).where(CropCycle.farm_id == farm_id, CropCycle.status.in_(("PLANNED", "ACTIVE", "HARVESTING")))) or 0},
+        "trade": trade_summary(farm_id, actor),
     }

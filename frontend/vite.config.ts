@@ -16,6 +16,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": "http://127.0.0.1:5000",
+      "/agent-gateway": {
+        target: "http://127.0.0.1:15100",
+        rewrite: (path) => path.replace(/^\/agent-gateway/u, ""),
+      },
     },
   },
   build: {

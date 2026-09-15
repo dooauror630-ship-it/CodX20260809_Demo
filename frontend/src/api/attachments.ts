@@ -1,0 +1,5 @@
+import { apiClient } from "./client";
+export interface Attachment { id: number; farmId: number; resourceType: string; resourceId: number | null; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string | null; }
+export async function getAttachments(farmId: number, resourceType: string, resourceId?: number) { return (await apiClient.get<{ data: { items: Attachment[] } }>("/attachments", { params: { farmId, resourceType, resourceId } })).data.data.items; }
+export async function uploadAttachment(file: File, farmId: number, resourceType: string, resourceId?: number) { const form = new FormData(); form.append("file", file); form.append("farmId", String(farmId)); form.append("resourceType", resourceType); if (resourceId) form.append("resourceId", String(resourceId)); return (await apiClient.post<{ data: { attachment: Attachment } }>("/attachments", form)).data.data.attachment; }
+export function attachmentDownloadUrl(id: number) { return `/api/v1/attachments/${id}/download`; }

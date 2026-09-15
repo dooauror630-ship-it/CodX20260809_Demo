@@ -1,0 +1,9 @@
+{
+  "name": "agri-harness-gateway",
+  "private": true,
+  "type": "module",
+  "description": "Per-user Harness runtime gateway for the agriculture management system",
+  "scripts": {
+    "start": "tsx index.ts"
+  }
+}

@@ -7,6 +7,7 @@ import { useRouter } from "vue-router";
 import { errorMessage } from "@/api/client";
 import { getBarns, getPlots } from "@/api/farms";
 import { getItems, getWarehouses } from "@/api/inventory";
+import { getCropCycles } from "@/api/crop";
 import {
   cancelInventoryCount,
   createInventoryCount,
@@ -24,6 +25,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useFarmStore } from "@/stores/farm";
 import type { Barn, Plot } from "@/types/farm";
 import type { Item, Warehouse } from "@/types/inventory";
+import type { CropCycle } from "@/types/crop";
 import type {
   InventoryAnalysis,
   InventoryCount,
@@ -58,6 +60,7 @@ const warehouses = ref<Warehouse[]>([]);
 const items = ref<Item[]>([]);
 const barns = ref<Barn[]>([]);
 const plots = ref<Plot[]>([]);
+const cropCycles = ref<CropCycle[]>([]);
 const summary = reactive<StockSummary>({ itemCount: 0, totalValue: "0.00", lowStockCount: 0 });
 const stockFilters = reactive({ keyword: "", warehouseId: null as number | null, lowStock: false });
 const ledgerFilters = reactive({
@@ -101,6 +104,7 @@ const productionCostObjectOptions = [
   { label: "农场通用", value: "farm" },
   { label: "圈舍", value: "barn" },
   { label: "地块", value: "plot" },
+  { label: "种植周期", value: "crop_cycle" },
 ];
 const productionForm = reactive({
   documentNo: "",
@@ -140,8 +144,20 @@ const countDialogTitle = computed(() => {
   return countReadOnly.value ? "盘点单详情" : "盘点录入";
 });
 const selectableCostObjects = computed(() => {
-  if (productionForm.costObjectType === "barn") return barns.value;
-  if (productionForm.costObjectType === "plot") return plots.value;
+  if (productionForm.costObjectType === "barn") {
+    return barns.value.map((item) => ({ id: item.id, label: `${item.name} (${item.code})` }));
+  }
+  if (productionForm.costObjectType === "plot") {
+    return plots.value.map((item) => ({ id: item.id, label: `${item.name} (${item.code})` }));
+  }
+  if (productionForm.costObjectType === "crop_cycle") {
+    return cropCycles.value
+      .filter((cycle) => cycle.status === "ACTIVE" || cycle.status === "HARVESTING")
+      .map((cycle) => ({
+        id: cycle.id,
+        label: `${cycle.cycleCode} (${cycle.cropTypeName ?? "种植周期"})`,
+      }));
+  }
   return [];
 });
 
@@ -192,11 +208,16 @@ function documentTypeLabel(entry: StockLedgerEntry) {
 
 function costObjectLabel(entry: StockLedgerEntry) {
   if (entry.costObjectType === "FARM") return `${farmContext.currentFarm?.name ?? "当前农场"}（通用）`;
+  if (entry.costObjectType === "CROP_CYCLE") {
+    const cycle = cropCycles.value.find((item) => item.id === entry.costObjectId);
+    return cycle ? `${cycle.cycleCode} (${cycle.cropTypeName ?? "种植周期"})` : `种植周期 #${entry.costObjectId}`;
+  }
   const resources = entry.costObjectType === "BARN" ? barns.value : entry.costObjectType === "PLOT" ? plots.value : [];
   const resource = resources.find((item) => item.id === entry.costObjectId);
   if (resource) return `${resource.name} (${resource.code})`;
   if (entry.costObjectType === "BARN") return `圈舍 #${entry.costObjectId}`;
   if (entry.costObjectType === "PLOT") return `地块 #${entry.costObjectId}`;
+  if (entry.costObjectType === "LIVESTOCK_BATCH") return `养殖批次 #${entry.costObjectId}`;
   return "-";
 }
 
@@ -409,6 +430,8 @@ function selectDefaultProductionCostObject() {
     productionForm.costObjectId = barns.value[0]?.id ?? null;
   } else if (productionForm.costObjectType === "plot") {
     productionForm.costObjectId = plots.value[0]?.id ?? null;
+  } else if (productionForm.costObjectType === "crop_cycle") {
+    productionForm.costObjectId = selectableCostObjects.value[0]?.id ?? null;
   } else {
     productionForm.costObjectId = null;
   }
@@ -436,7 +459,7 @@ function openProductionDialog() {
 function selectedCostObjectLabel() {
   if (productionForm.costObjectType === "farm") return `${farmContext.currentFarm?.name ?? "当前农场"}（通用）`;
   const resource = selectableCostObjects.value.find((item) => item.id === productionForm.costObjectId);
-  return resource ? `${resource.name} (${resource.code})` : "未选择使用对象";
+  return resource?.label ?? "未选择使用对象";
 }
 
 async function saveProductionOperation() {
@@ -455,7 +478,13 @@ async function saveProductionOperation() {
     return ElMessage.error(`物料“${selectedProductionItem.value.name}”必须填写批号`);
   }
   if (productionForm.costObjectType !== "farm" && !productionForm.costObjectId) {
-    return ElMessage.error(`请选择${productionForm.costObjectType === "barn" ? "圈舍" : "地块"}`);
+    const labels: Record<Exclude<ProductionCostObjectType, "farm">, string> = {
+      barn: "圈舍",
+      plot: "地块",
+      livestock_batch: "养殖批次",
+      crop_cycle: "种植周期",
+    };
+    return ElMessage.error(`请选择${labels[productionForm.costObjectType]}`);
   }
   try {
     await ElMessageBox.confirm(
@@ -543,19 +572,22 @@ async function loadReferences() {
     items.value = [];
     barns.value = [];
     plots.value = [];
+    cropCycles.value = [];
     return;
   }
   try {
-    const [warehouseData, itemData, barnData, plotData] = await Promise.all([
+    const [warehouseData, itemData, barnData, plotData, cropCycleData] = await Promise.all([
       getWarehouses({ farmId, page: 1, pageSize: 100, status: "active" }),
       getItems({ farmId, page: 1, pageSize: 100, status: "active" }),
       getBarns({ farmId, page: 1, pageSize: 100, status: "active" }),
       getPlots({ farmId, page: 1, pageSize: 100, status: "active" }),
+      getCropCycles({ farmId, page: 1, pageSize: 100, status: "all" }),
     ]);
     warehouses.value = warehouseData.items;
     items.value = itemData.items;
     barns.value = barnData.items;
     plots.value = plotData.items;
+    cropCycles.value = cropCycleData.items;
   } catch (error) {
     ElMessage.error(errorMessage(error));
   }
@@ -948,8 +980,8 @@ watch(
           </el-form-item>
           <el-form-item class="farm-form-span" label="使用对象" required>
             <el-input v-if="productionForm.costObjectType === 'farm'" :model-value="`${farmContext.currentFarm?.name ?? '当前农场'}（通用）`" disabled aria-label="使用对象" />
-            <el-select v-else v-model="productionForm.costObjectId" class="full-width-control" filterable :placeholder="`请选择${productionForm.costObjectType === 'barn' ? '圈舍' : '地块'}`" aria-label="使用对象">
-              <el-option v-for="item in selectableCostObjects" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" />
+            <el-select v-else v-model="productionForm.costObjectId" class="full-width-control" filterable :placeholder="`请选择${productionForm.costObjectType === 'barn' ? '圈舍' : productionForm.costObjectType === 'plot' ? '地块' : productionForm.costObjectType === 'crop_cycle' ? '种植周期' : '养殖批次'}`" aria-label="使用对象">
+              <el-option v-for="item in selectableCostObjects" :key="item.id" :label="item.label" :value="item.id" />
             </el-select>
           </el-form-item>
         </div>

@@ -1,0 +1,10 @@
+- insert:
+    - id: agri-agent-tools
+      name: !!js process.env.AGRI_HARNESS_PLUGIN_PATH
+      inject: [tools]
+      config:
+        baseUrl: !!js process.env.AGRI_AGENT_BASE_URL ?? 'http://127.0.0.1:15000'
+        apiKey: !!js process.env.AGRI_AGENT_API_KEY ?? ''
+        sessionToken: !!js process.env.AGRI_AGENT_SESSION_TOKEN ?? ''
+        gatewayToken: !!js process.env.AGRI_AGENT_GATEWAY_TOKEN ?? ''
+        timeoutMs: !!js Number(process.env.AGRI_AGENT_TIMEOUT_MS ?? 5000)

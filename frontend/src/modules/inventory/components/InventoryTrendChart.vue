@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BarChart } from "echarts/charts";
-import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { AriaComponent, GraphicComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { init, use, type ECharts } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -9,7 +9,7 @@ import { buildInventoryTrendOption } from "../inventoryChartOptions";
 import type { InventoryTrendPoint } from "@/types/purchase";
 
 
-use([BarChart, GridComponent, LegendComponent, TooltipComponent, AriaComponent, CanvasRenderer]);
+use([BarChart, GridComponent, LegendComponent, TooltipComponent, GraphicComponent, AriaComponent, CanvasRenderer]);
 
 const props = defineProps<{ data: InventoryTrendPoint[] }>();
 const chartElement = ref<HTMLDivElement>();
